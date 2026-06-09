@@ -150,7 +150,8 @@ function applyCandles(candles) {
     .map((v, i) => v !== null ? { time: candles[i].time, value: v } : null)
     .filter(Boolean);
   smaSeries.setData(smaData);
-  chart.timeScale().fitContent();
+  // fitContent apenas na primeira carga — preserva zoom nas actualizações seguintes
+  if (!candlesLoaded) chart.timeScale().fitContent();
 }
 
 function applyTradeMarkers(trades) {
@@ -346,6 +347,26 @@ async function init() {
   await loadCandles();
   await pollStatus();
 }
+
+// ─── Zoom Controls ───────────────────────────────────────────────────────────
+(function () {
+  const ts = chart.timeScale();
+  const STEP = 3; // barras por clique
+
+  document.getElementById('zoom-in').addEventListener('click', () => {
+    const cur = ts.options().barSpacing ?? 6;
+    ts.applyOptions({ barSpacing: Math.min(cur + STEP, 50) });
+  });
+
+  document.getElementById('zoom-out').addEventListener('click', () => {
+    const cur = ts.options().barSpacing ?? 6;
+    ts.applyOptions({ barSpacing: Math.max(cur - STEP, 1) });
+  });
+
+  document.getElementById('zoom-fit').addEventListener('click', () => {
+    ts.fitContent();
+  });
+})();
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 init();
