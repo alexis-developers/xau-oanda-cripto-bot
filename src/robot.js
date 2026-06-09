@@ -585,7 +585,7 @@ function startHttpServer() {
         position,
         isWarmingUp,
         wsReady,
-        config: { SMA_PERIOD, SLOPE_THRESHOLD, SL_POINTS, TRAILING_BUFFER, TP1_RATIO, MULTIPLIER, STAKE, RISK_PERC, DAILY_LOSS_PERC }
+        config: { SMA_PERIOD, SLOPE_THRESHOLD, SL_POINTS, TRAILING_BUFFER, TP1_RATIO, TP1_CLOSE_PERC, MULTIPLIER, STAKE, RISK_PERC, DAILY_LOSS_PERC }
       }));
       return;
     }

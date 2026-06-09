@@ -150,6 +150,7 @@ function applyCandles(candles) {
     .map((v, i) => v !== null ? { time: candles[i].time, value: v } : null)
     .filter(Boolean);
   smaSeries.setData(smaData);
+  chart.timeScale().fitContent();
 }
 
 function applyTradeMarkers(trades) {
