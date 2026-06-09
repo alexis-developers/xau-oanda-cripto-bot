@@ -282,22 +282,24 @@ async function enterTrade(signal) {
   log(`SINAL ${signal.toUpperCase()} | SL: ${slPrice.toFixed(2)} ($${slAmount}) | TP1: ${tp1Price.toFixed(2)} ($${tp1Amount})`, 'system');
 
   try {
-    const result = await sendWS({
-      buy: 1,
-      price: STAKE * 2,
-      parameters: {
-        amount:        STAKE,
-        basis:         'stake',
-        contract_type: contractType,
-        currency:      'USD',
-        multiplier:    MULTIPLIER,
-        symbol:        SYMBOL,
-        limit_order: {
-          stop_loss:   { value: slAmount },
-          take_profit: { value: tp1Amount * (TP1_CLOSE_PERC / 100) }
-        }
+    // Nova API Deriv: proposal → buy (2 passos)
+    const proposalRes = await sendWS({
+      proposal:          1,
+      contract_type:     contractType,
+      currency:          'USD',
+      underlying_symbol: SYMBOL,
+      amount:            STAKE,
+      basis:             'stake',
+      multiplier:        MULTIPLIER,
+      limit_order: {
+        stop_loss:   slAmount,
+        take_profit: parseFloat((tp1Amount * (TP1_CLOSE_PERC / 100)).toFixed(2))
       }
     });
+    const proposalId = proposalRes.proposal?.id;
+    if (!proposalId) throw new Error('Proposal sem ID: ' + JSON.stringify(proposalRes));
+
+    const result = await sendWS({ buy: proposalId, price: STAKE * 2 });
 
     const contract   = result.buy;
     const contractId = contract.contract_id;
@@ -383,19 +385,17 @@ async function managePosition() {
         const beSlAmount = priceToUSD(trailStake, MULTIPLIER, currentPrice, beSlDist);
 
         await sleep(1000);
-        const result2 = await sendWS({
-          buy: 1,
-          price: trailStake * 2,
-          parameters: {
-            amount:        trailStake,
-            basis:         'stake',
-            contract_type: position.contractType,
-            currency:      'USD',
-            multiplier:    MULTIPLIER,
-            symbol:        SYMBOL,
-            limit_order:   { stop_loss: { value: Math.max(0.01, beSlAmount) } }
-          }
+        const prop2 = await sendWS({
+          proposal:          1,
+          contract_type:     position.contractType,
+          currency:          'USD',
+          underlying_symbol: SYMBOL,
+          amount:            trailStake,
+          basis:             'stake',
+          multiplier:        MULTIPLIER,
+          limit_order:       { stop_loss: parseFloat(Math.max(0.13, beSlAmount).toFixed(2)) }
         });
+        const result2 = await sendWS({ buy: prop2.proposal.id, price: trailStake * 2 });
 
         const c2 = result2.buy;
         position = {
@@ -446,7 +446,7 @@ async function managePosition() {
       await sendWS({
         contract_update: 1,
         contract_id:     position.contractId,
-        limit_order: { stop_loss: { value: Math.max(0.01, newSLAmount) } }
+        limit_order: { stop_loss: parseFloat(Math.max(0.13, newSLAmount).toFixed(2)) }
       });
       log(`Trailing SL: ${position.sl.toFixed(2)} → ${newSLPrice.toFixed(2)} ($${newSLAmount.toFixed(2)})`, 'info');
       position.sl       = newSLPrice;
