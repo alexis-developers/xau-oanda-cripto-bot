@@ -9,23 +9,24 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const DERIV_TOKEN    = process.env.DERIV_TOKEN;
-const APP_ID         = process.env.DERIV_APP_ID    || '1089';
-const SYMBOL         = process.env.SYMBOL          || 'frxXAUUSD';
-const TIMEFRAME      = process.env.TIMEFRAME       || 'M15';
-const MULTIPLIER     = parseInt(process.env.MULTIPLIER    || '100');
-const STAKE          = parseFloat(process.env.STAKE       || '10');
-const CAPITAL_TOTAL  = parseFloat(process.env.CAPITAL_TOTAL  || '10000');
-const RISK_PERC      = parseFloat(process.env.RISK_PERC      || '1');
-const SMA_PERIOD     = parseInt(process.env.SMA_PERIOD       || '20');
-const SLOPE_THRESHOLD= parseFloat(process.env.SLOPE_THRESHOLD|| '0.5');
-const SL_POINTS      = parseFloat(process.env.SL_POINTS      || '2.0');
-const TRAILING_BUFFER= parseFloat(process.env.TRAILING_BUFFER|| '0.5');
-const TP1_RATIO      = parseFloat(process.env.TP1_RATIO      || '2.0');
-const TP1_CLOSE_PERC = parseFloat(process.env.TP1_CLOSE_PERC || '80');
-const DAILY_LOSS_PERC= parseFloat(process.env.DAILY_LOSS_PERC|| '5');
-const PORT           = parseInt(process.env.PORT            || '8000');
-const WEBHOOK_URL    = process.env.WEBHOOK_URL || '';
+const DERIV_TOKEN     = process.env.DERIV_TOKEN;
+const DERIV_ACCOUNT_ID= process.env.DERIV_ACCOUNT_ID || 'DOT93096841';
+const APP_ID          = process.env.DERIV_APP_ID     || '33v8gypvQ2TA7ORg5HNfb';
+const SYMBOL          = process.env.SYMBOL           || 'frxXAUUSD';
+const TIMEFRAME       = process.env.TIMEFRAME        || 'M15';
+const MULTIPLIER      = parseInt(process.env.MULTIPLIER     || '100');
+const STAKE           = parseFloat(process.env.STAKE        || '10');
+const CAPITAL_TOTAL   = parseFloat(process.env.CAPITAL_TOTAL   || '10000');
+const RISK_PERC       = parseFloat(process.env.RISK_PERC       || '1');
+const SMA_PERIOD      = parseInt(process.env.SMA_PERIOD        || '20');
+const SLOPE_THRESHOLD = parseFloat(process.env.SLOPE_THRESHOLD || '0.5');
+const SL_POINTS       = parseFloat(process.env.SL_POINTS       || '2.0');
+const TRAILING_BUFFER = parseFloat(process.env.TRAILING_BUFFER || '0.5');
+const TP1_RATIO       = parseFloat(process.env.TP1_RATIO       || '2.0');
+const TP1_CLOSE_PERC  = parseFloat(process.env.TP1_CLOSE_PERC  || '80');
+const DAILY_LOSS_PERC = parseFloat(process.env.DAILY_LOSS_PERC || '5');
+const PORT            = parseInt(process.env.PORT             || '8000');
+const WEBHOOK_URL     = process.env.WEBHOOK_URL || '';
 
 // Deriv granularity (seconds)
 const GRAN_MAP = { M1:60, M5:300, M15:900, M30:1800, H1:3600, H4:14400, D1:86400 };
@@ -46,24 +47,16 @@ let dailyPnL      = 0;
 let dailyDate     = new Date().toDateString();
 let isWarmingUp   = true;
 let candleCache   = [];
-let formingCandle = null; // candle em formação (não fechado)
+let formingCandle = null;
 let httpStarted   = false;
 
 // Posição ativa
 let position = null;
 // {
-//   contractId:   number,
-//   side:         'buy'|'sell',       — direção da operação
-//   contractType: 'MULTUP'|'MULTDOWN',
-//   fullStake:    number,             — stake original
-//   currentStake: number,             — stake atual (após TP1)
-//   entryPrice:   number,
-//   sl:           number,             — SL em nível de preço
-//   slAmount:     number,             — SL em USD (enviado à Deriv)
-//   tp1Price:     number,
-//   tp1Hit:       boolean,
-//   isBreakeven:  boolean,
-//   subId:        string              — subscription ID do contrato
+//   contractId, side, contractType,
+//   fullStake, currentStake,
+//   entryPrice, sl, slAmount, tp1Price,
+//   tp1Hit, isBreakeven
 // }
 
 // ─── Logging & Webhook ────────────────────────────────────────────────────────
@@ -119,23 +112,21 @@ function calcSMA(closes, period) {
 // ─── Signal Engine ────────────────────────────────────────────────────────────
 function detectSignal(candles) {
   if (candles.length < SMA_PERIOD + 5) return null;
-  const closes = candles.map(c => c.close);
-  const sma    = calcSMA(closes, SMA_PERIOD);
-  const n      = candles.length;
+  const closes  = candles.map(c => c.close);
+  const sma     = calcSMA(closes, SMA_PERIOD);
+  const n       = candles.length;
   const smaNow  = sma[n - 1], smaPrev = sma[n - 2], sma3 = sma[n - 4];
   if (!smaNow || !smaPrev || !sma3) return null;
   const trigger = candles[n - 1], pivot = candles[n - 2];
-  const slope = smaNow - sma3;
-  const up    = slope >  SLOPE_THRESHOLD;
-  const down  = slope < -SLOPE_THRESHOLD;
+  const slope   = smaNow - sma3;
+  const up      = slope >  SLOPE_THRESHOLD;
+  const down    = slope < -SLOPE_THRESHOLD;
   if (up   && pivot.low  <= smaPrev && trigger.close > trigger.open && trigger.high > pivot.high) return 'buy';
   if (down && pivot.high >= smaPrev && trigger.close < trigger.open && trigger.low  < pivot.low)  return 'sell';
   return null;
 }
 
 // ─── Risk Manager ─────────────────────────────────────────────────────────────
-// Converte distância de preço → valor em USD para Deriv Multipliers
-// P&L = stake * multiplier * price_move / entry_price
 function priceToUSD(stake, mult, entryPrice, priceDistance) {
   return parseFloat((stake * mult * Math.abs(priceDistance) / entryPrice).toFixed(2));
 }
@@ -159,7 +150,7 @@ function isDailyLimitHit() {
 // ─── WebSocket Manager ────────────────────────────────────────────────────────
 let ws;
 let reqCounter  = 0;
-let msgHandlers = new Map(); // reqId → {resolve, reject}
+let msgHandlers = new Map();
 let wsReady     = false;
 
 function sendWS(msg, timeoutMs = 30000) {
@@ -182,7 +173,6 @@ function handleMessage(raw) {
   try { msg = JSON.parse(raw.toString()); }
   catch { return; }
 
-  // Response to specific request
   if (msg.req_id && msgHandlers.has(msg.req_id)) {
     const { resolve, reject } = msgHandlers.get(msg.req_id);
     msgHandlers.delete(msg.req_id);
@@ -191,7 +181,6 @@ function handleMessage(raw) {
     return;
   }
 
-  // Subscription updates (no req_id match)
   switch (msg.msg_type) {
     case 'ohlc':    handleOHLC(msg.ohlc);             break;
     case 'balance': handleBalance(msg.balance);        break;
@@ -216,10 +205,8 @@ function handleOHLC(ohlc) {
   };
 
   if (formingCandle && formingCandle.time !== openTime) {
-    // Candle anterior fechou — adiciona ao histórico
     candleCache.push({ ...formingCandle });
     if (candleCache.length > 500) candleCache.shift();
-
     if (!isWarmingUp) {
       processNewCandle().catch(e => log(`Erro no tick: ${e.message}`, 'error'));
     }
@@ -233,7 +220,6 @@ function handleContractUpdate(poc) {
   if (!poc || !position) return;
   if (poc.contract_id !== position.contractId) return;
 
-  // Contrato fechado (SL atingido, expirado, etc.)
   if (poc.is_sold || poc.status === 'sold') {
     const pl = parseFloat(poc.profit || 0);
     log(`Contrato ${position.contractId} fechado. PnL: $${pl.toFixed(2)}`, 'system');
@@ -298,7 +284,7 @@ async function enterTrade(signal) {
   try {
     const result = await sendWS({
       buy: 1,
-      price: STAKE * 2,           // limite máximo de custo
+      price: STAKE * 2,
       parameters: {
         amount:        STAKE,
         basis:         'stake',
@@ -307,7 +293,7 @@ async function enterTrade(signal) {
         multiplier:    MULTIPLIER,
         symbol:        SYMBOL,
         limit_order: {
-          stop_loss:   { value: slAmount  },
+          stop_loss:   { value: slAmount },
           take_profit: { value: tp1Amount * (TP1_CLOSE_PERC / 100) }
         }
       }
@@ -331,7 +317,6 @@ async function enterTrade(signal) {
       isBreakeven:  false
     };
 
-    // Subscrever atualizações do contrato (detecta SL/TP automático)
     sendWS({ proposal_open_contract: 1, contract_id: contractId, subscribe: 1 })
       .catch(e => log(`Subscribe contrato: ${e.message}`, 'error'));
 
@@ -393,9 +378,8 @@ async function managePosition() {
 
         log(`TP1 atingido! PnL: $${pl.toFixed(2)}. Reabrindo 20%...`, 'system');
 
-        // Reabrir posição trailing com 20% do stake original
         const trailStake = parseFloat((position.fullStake * (1 - TP1_CLOSE_PERC / 100)).toFixed(2));
-        const beSlDist   = 0.01; // SL quase em breakeven
+        const beSlDist   = 0.01;
         const beSlAmount = priceToUSD(trailStake, MULTIPLIER, currentPrice, beSlDist);
 
         await sleep(1000);
@@ -421,7 +405,7 @@ async function managePosition() {
           fullStake:    position.fullStake,
           currentStake: trailStake,
           entryPrice:   parseFloat(c2.buy_price) || currentPrice,
-          sl:           currentPrice,   // breakeven
+          sl:           currentPrice,
           slAmount:     beSlAmount,
           tp1Price:     position.tp1Price,
           tp1Hit:       true,
@@ -449,13 +433,12 @@ async function managePosition() {
     let newSLPrice;
     if (position.side === 'buy') {
       newSLPrice = prevCandle.low - TRAILING_BUFFER;
-      if (newSLPrice <= position.sl) return; // só move favorável
+      if (newSLPrice <= position.sl) return;
     } else {
       newSLPrice = prevCandle.high + TRAILING_BUFFER;
       if (newSLPrice >= position.sl) return;
     }
 
-    // Calcula novo SL em USD
     const slDist      = Math.abs(position.entryPrice - newSLPrice);
     const newSLAmount = priceToUSD(position.currentStake, MULTIPLIER, position.entryPrice, slDist);
 
@@ -463,25 +446,37 @@ async function managePosition() {
       await sendWS({
         contract_update: 1,
         contract_id:     position.contractId,
-        limit_order: {
-          stop_loss: { value: Math.max(0.01, newSLAmount) }
-        }
+        limit_order: { stop_loss: { value: Math.max(0.01, newSLAmount) } }
       });
       log(`Trailing SL: ${position.sl.toFixed(2)} → ${newSLPrice.toFixed(2)} ($${newSLAmount.toFixed(2)})`, 'info');
       position.sl       = newSLPrice;
       position.slAmount = newSLAmount;
-
     } catch (e) {
       log(`Erro no trailing SL: ${e.message}`, 'error');
     }
   }
 }
 
-// ─── Deriv WebSocket Connection ───────────────────────────────────────────────
-async function authorize() {
-  const res = await sendWS({ authorize: DERIV_TOKEN });
-  log(`Autorizado: ${res.authorize?.email || res.authorize?.loginid}`, 'system');
-  return res;
+// ─── Deriv New API — OTP + WebSocket ─────────────────────────────────────────
+async function getOTP() {
+  const res = await fetch(
+    `https://api.derivws.com/trading/v1/options/accounts/${DERIV_ACCOUNT_ID}/otp`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${DERIV_TOKEN}`,
+        'Deriv-App-ID':  APP_ID,
+        'Content-Type':  'application/json'
+      }
+    }
+  );
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`OTP HTTP ${res.status}: ${body}`);
+  }
+  const json = await res.json();
+  if (!json.data?.url) throw new Error('OTP sem URL: ' + JSON.stringify(json));
+  return json.data.url;
 }
 
 async function loadHistory() {
@@ -525,21 +520,30 @@ async function subscribeBalance() {
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-function connectWS() {
-  log(`Conectando ao Deriv WebSocket (App ${APP_ID})...`, 'system');
-  ws = new WebSocket(`wss://ws.binaryws.com/websockets/v3?app_id=${APP_ID}`);
+async function connectWS() {
+  log('Obtendo OTP Deriv...', 'system');
+  let wsUrl;
+  try {
+    wsUrl = await getOTP();
+  } catch (e) {
+    log(`Erro OTP: ${e.message}. Tentando em 10s...`, 'error');
+    setTimeout(connectWS, 10000);
+    return;
+  }
+
+  log(`Conectando ao Deriv WebSocket (nova API)...`, 'system');
+  ws = new WebSocket(wsUrl);
 
   ws.on('open', async () => {
     log('WebSocket conectado', 'system');
     wsReady = true;
     try {
-      await authorize();
       await loadHistory();
       await subscribeCandles();
       await subscribeBalance();
       if (!httpStarted) { startHttpServer(); httpStarted = true; }
     } catch (e) {
-      log(`Erro na inicialização: ${e.message}`, 'error');
+      log(`Erro na inicialização WS: ${e.message}`, 'error');
     }
   });
 
@@ -548,7 +552,6 @@ function connectWS() {
   ws.on('close', () => {
     wsReady = false;
     log('WebSocket desconectado. Reconectando em 5s...', 'warning');
-    // Limpa handlers pendentes
     msgHandlers.forEach(({ reject }) => reject(new Error('WS disconnected')));
     msgHandlers.clear();
     setTimeout(connectWS, 5000);
@@ -571,6 +574,7 @@ function startHttpServer() {
       res.writeHead(200);
       res.end(JSON.stringify({
         broker:       'Deriv',
+        accountId:    DERIV_ACCOUNT_ID,
         symbol:       SYMBOL,
         timeframe:    TIMEFRAME,
         currentPrice: last?.close ?? null,
@@ -583,8 +587,8 @@ function startHttpServer() {
       }));
       return;
     }
-    if (url === '/trades')  { res.writeHead(200); res.end(JSON.stringify(trades));     return; }
-    if (url === '/logs')    { res.writeHead(200); res.end(JSON.stringify(logs));       return; }
+    if (url === '/trades')  { res.writeHead(200); res.end(JSON.stringify(trades));      return; }
+    if (url === '/logs')    { res.writeHead(200); res.end(JSON.stringify(logs));        return; }
     if (url === '/candles') { res.writeHead(200); res.end(JSON.stringify(candleCache)); return; }
     res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' }));
   });
@@ -593,10 +597,10 @@ function startHttpServer() {
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 async function main() {
-  log(`=== XAU/USD Deriv Robot v3.0 ===`, 'system');
-  log(`${SYMBOL} ${TIMEFRAME} | Mult: ${MULTIPLIER}x | Stake: $${STAKE}`, 'system');
+  log(`=== XAU/USD Deriv Robot v4.0 ===`, 'system');
+  log(`${SYMBOL} ${TIMEFRAME} | Mult: ${MULTIPLIER}x | Stake: $${STAKE} | Conta: ${DERIV_ACCOUNT_ID}`, 'system');
   rebuildEquity();
-  connectWS(); // evento-driven — não precisa de loop principal
+  await connectWS();
 }
 
 main().catch(e => { console.error('Erro fatal:', e); process.exit(1); });
