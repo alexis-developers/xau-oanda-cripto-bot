@@ -1,0 +1,14 @@
+# Sensível — NUNCA commitar
+.env
+
+# Dependências
+node_modules/
+
+# Dados locais
+trades.json
+logs/
+*.log
+
+# Sistema
+.DS_Store
+Thumbs.db

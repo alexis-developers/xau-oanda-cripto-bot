@@ -1,0 +1,13 @@
+# Cloudflare Tunnel — XAU OANDA Bot
+# Preencher SEU-TUNNEL-ID após: cloudflared tunnel create xau-oanda-bot
+#
+# O tunnel expõe o robô (porta 8000) de forma segura em HTTPS,
+# resolvendo o Mixed Content Error entre Cloudflare Pages (HTTPS) e o robô (HTTP).
+
+tunnel: SEU-TUNNEL-ID
+credentials-file: /root/.cloudflared/SEU-TUNNEL-ID.json
+
+ingress:
+  - hostname: xau-bot.desenvolvimentodesites.dev.br
+    service: http://localhost:8000
+  - service: http_status:404

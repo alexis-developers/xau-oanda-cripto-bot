@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XAU/USD — Roland Master Trader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+
+<header>
+  <h1>XAU/USD — Roland Master Trader</h1>
+  <div class="header-meta">
+    <span id="env-badge" class="badge practice">PRACTICE</span>
+    <span id="tf-badge" style="color:#8b949e;font-size:12px">M15</span>
+    <span id="status-dot"></span>
+  </div>
+</header>
+
+<!-- API URL Config Bar -->
+<div class="api-url-bar">
+  <label>API URL:</label>
+  <input type="text" id="api-url-input" placeholder="http://localhost:8000">
+  <button id="api-url-save">Conectar</button>
+</div>
+
+<div class="main-grid">
+
+  <!-- Stats Bar -->
+  <div class="stats-bar">
+    <div class="stat">
+      <span class="stat-label">Preço Atual</span>
+      <span class="stat-value" id="stat-price">—</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Equity</span>
+      <span class="stat-value" id="stat-equity">—</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">PnL do Dia</span>
+      <span class="stat-value" id="stat-daily-pnl">—</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">SMA Período</span>
+      <span class="stat-value" id="stat-sma">20</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Risco/Trade</span>
+      <span class="stat-value" id="stat-risk">1%</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Último Candle</span>
+      <span class="stat-value" id="stat-last-candle" style="font-size:12px">—</span>
+    </div>
+  </div>
+
+  <!-- Charts Area -->
+  <div class="charts-area">
+    <div id="chart-main"></div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+
+    <div class="sidebar-section">
+      <h3>Posição Ativa</h3>
+      <div id="position-card" class="position-card flat">
+        <span style="font-size:12px">Sem posição aberta</span>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Configuração</h3>
+      <table class="config-table" id="config-table">
+        <tr><td>SMA Período</td><td id="cfg-sma">—</td></tr>
+        <tr><td>Slope Threshold</td><td id="cfg-slope">—</td></tr>
+        <tr><td>SL Points</td><td id="cfg-sl">—</td></tr>
+        <tr><td>Trailing Buffer</td><td id="cfg-trail">—</td></tr>
+        <tr><td>TP1 Ratio</td><td id="cfg-tp1">—</td></tr>
+        <tr><td>TP1 Close %</td><td id="cfg-tp1c">—</td></tr>
+        <tr><td>Risco %</td><td id="cfg-risk">—</td></tr>
+        <tr><td>Perda Diária %</td><td id="cfg-daily">—</td></tr>
+      </table>
+    </div>
+
+    <div class="sidebar-section" style="flex:1;overflow:hidden;display:flex;flex-direction:column">
+      <h3>Últimas Operações</h3>
+      <div class="trades-list" id="trades-list"></div>
+    </div>
+
+    <div class="sidebar-section" style="flex:1;overflow:hidden;display:flex;flex-direction:column">
+      <h3>Terminal de Logs</h3>
+      <div class="log-terminal" id="log-terminal"></div>
+    </div>
+
+  </div>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
