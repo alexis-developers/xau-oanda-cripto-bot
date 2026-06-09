@@ -17,6 +17,7 @@ const COLORS = {
 
 // ─── API URL (configurable — stored in localStorage) ─────────────────────────
 let apiUrl = localStorage.getItem('roland_api_url') || 'https://xau-bot.desenvolvimentodesites.dev.br';
+// Porta local: http://134.65.226.110:8001 | Via tunnel: https://xau-bot.desenvolvimentodesites.dev.br
 
 const apiInput = document.getElementById('api-url-input');
 apiInput.value = apiUrl;
