@@ -1,7 +1,7 @@
 {
   "name": "xau-oanda-bot",
   "version": "1.0.0",
-  "description": "XAU/USD Trend Following Robot — OANDA REST V20",
+  "description": "XAU/USD Trend Following Robot — Deriv WebSocket API",
   "type": "module",
   "main": "src/robot.js",
   "scripts": {
@@ -9,7 +9,8 @@
     "dev": "node --watch src/robot.js"
   },
   "dependencies": {
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "ws": "^8.21.0"
   },
   "engines": {
     "node": ">=18.0.0"
