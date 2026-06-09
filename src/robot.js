@@ -592,6 +592,40 @@ function startHttpServer() {
     if (url === '/trades')  { res.writeHead(200); res.end(JSON.stringify(trades));      return; }
     if (url === '/logs')    { res.writeHead(200); res.end(JSON.stringify(logs));        return; }
     if (url === '/candles') { res.writeHead(200); res.end(JSON.stringify(candleCache)); return; }
+
+    // Endpoint de teste — força entrada manual (apenas demo)
+    if (url.startsWith('/force-trade')) {
+      if (!wsReady || candleCache.length < 2) {
+        res.writeHead(400); res.end(JSON.stringify({ error: 'Robot not ready' })); return;
+      }
+      if (position) {
+        res.writeHead(400); res.end(JSON.stringify({ error: 'Position already open', position })); return;
+      }
+      const params = new URLSearchParams(req.url.split('?')[1] || '');
+      const side = params.get('side') === 'sell' ? 'sell' : 'buy';
+      res.writeHead(200); res.end(JSON.stringify({ ok: true, message: `Forcing ${side} entry...` }));
+      enterTrade(side).catch(e => log(`force-trade error: ${e.message}`, 'error'));
+      return;
+    }
+
+    // Endpoint de teste — fecha posição atual
+    if (url === '/force-close') {
+      if (!position) {
+        res.writeHead(400); res.end(JSON.stringify({ error: 'No open position' })); return;
+      }
+      res.writeHead(200); res.end(JSON.stringify({ ok: true, message: 'Closing position...' }));
+      sendWS({ sell: position.contractId, price: 0 })
+        .then(r => {
+          const pl = parseFloat(r.sell?.sold_for || 0) - position.currentStake;
+          equity += pl; dailyPnL += pl;
+          saveTrade({ id: `manual_close_${Date.now()}`, timestamp: Date.now(), datetime: new Date().toISOString(), side: position.side === 'buy' ? 'sell' : 'buy', type: 'manual_close', price: candleCache[candleCache.length-1]?.close, pnl: pl });
+          log(`Posição fechada manualmente. PnL: $${pl.toFixed(2)}`, 'system');
+          position = null;
+        })
+        .catch(e => log(`force-close error: ${e.message}`, 'error'));
+      return;
+    }
+
     res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' }));
   });
   server.listen(PORT, () => log(`Servidor HTTP na porta ${PORT}`, 'system'));
