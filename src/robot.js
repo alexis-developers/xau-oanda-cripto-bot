@@ -514,7 +514,7 @@ async function subscribeCandles() {
 }
 
 async function subscribeBalance() {
-  await sendWS({ balance: 1, subscribe: 1, account: 'current' });
+  await sendWS({ balance: 1, subscribe: 1 });
   log('Balance subscrito', 'system');
 }
 
@@ -540,11 +540,13 @@ async function connectWS() {
     try {
       await loadHistory();
       await subscribeCandles();
-      await subscribeBalance();
-      if (!httpStarted) { startHttpServer(); httpStarted = true; }
     } catch (e) {
-      log(`Erro na inicialização WS: ${e.message}`, 'error');
+      log(`Erro crítico WS: ${e.message}`, 'error');
+      return;
     }
+    // Balance subscription é opcional — não bloqueia o restante
+    subscribeBalance().catch(e => log(`Balance subscription: ${e.message}`, 'warning'));
+    if (!httpStarted) { startHttpServer(); httpStarted = true; }
   });
 
   ws.on('message', (data) => handleMessage(data));
