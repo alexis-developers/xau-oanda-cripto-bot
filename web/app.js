@@ -154,22 +154,33 @@ function applyCandles(candles) {
 }
 
 function applyTradeMarkers(trades) {
+  const GRAN = 900; // M15 em segundos — alinha ao candle correcto
+
   const markers = trades
-    .filter(t => t.type === 'entry' || t.type === 'partial_tp' || t.type === 'stop_loss')
+    .filter(t => ['entry', 'tp1_close', 'stop_loss', 'manual_close', 'close'].includes(t.type))
     .map(t => {
-      const isBuy  = t.side === 'buy'  || t.type === 'entry' && t.side === 'buy';
-      const isExit = t.type === 'partial_tp' || t.type === 'stop_loss';
-      return {
-        time:     Math.floor(t.timestamp / 1000),
-        position: isExit
-          ? (t.side === 'sell' ? 'aboveBar' : 'belowBar')
-          : (t.side === 'buy' ? 'belowBar' : 'aboveBar'),
-        color:    isExit ? COLORS.tp1 : (t.side === 'buy' ? COLORS.buyMarker : COLORS.sellMarker),
-        shape:    isExit ? 'circle' : (t.side === 'buy' ? 'arrowUp' : 'arrowDown'),
-        text:     isExit
-          ? `${t.type === 'stop_loss' ? 'SL' : 'TP1'} ${t.pnl >= 0 ? '+' : ''}${t.pnl?.toFixed(2) ?? ''}$`
-          : `${t.side.toUpperCase()} ${t.price?.toFixed(2) ?? ''}`,
-      };
+      const ts          = Math.floor(t.timestamp / 1000);
+      const alignedTime = Math.floor(ts / GRAN) * GRAN; // alinha à abertura do candle M15
+      const isEntry     = t.type === 'entry';
+      const isBuy       = t.side === 'buy';
+
+      let color, shape, position, text;
+
+      if (isEntry) {
+        color    = isBuy ? COLORS.buyMarker : COLORS.sellMarker;
+        shape    = isBuy ? 'arrowUp' : 'arrowDown';
+        position = isBuy ? 'belowBar' : 'aboveBar';
+        text     = `${t.side.toUpperCase()} ${t.price?.toFixed(2) ?? ''}`;
+      } else {
+        const pnlStr = t.pnl != null ? ` ${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)}` : '';
+        const isSL   = t.type === 'stop_loss';
+        color    = isSL ? COLORS.bear : COLORS.tp1;
+        shape    = 'circle';
+        position = isSL ? 'belowBar' : 'aboveBar';
+        text     = `${isSL ? 'SL' : 'TP'}${pnlStr}`;
+      }
+
+      return { time: alignedTime, position, color, shape, text };
     })
     .sort((a, b) => a.time - b.time);
 

@@ -303,7 +303,8 @@ async function enterTrade(signal) {
 
     const contract   = result.buy;
     const contractId = contract.contract_id;
-    const entryPrice = parseFloat(contract.buy_price) || trigger.close;
+    // buy_price na nova API Deriv é o stake, não o preço de mercado
+    const entryPrice = trigger.close;
 
     position = {
       contractId,
@@ -404,7 +405,7 @@ async function managePosition() {
           contractType: position.contractType,
           fullStake:    position.fullStake,
           currentStake: trailStake,
-          entryPrice:   parseFloat(c2.buy_price) || currentPrice,
+          entryPrice:   currentPrice,
           sl:           currentPrice,
           slAmount:     beSlAmount,
           tp1Price:     position.tp1Price,
