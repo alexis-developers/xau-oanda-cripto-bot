@@ -8,31 +8,46 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const OANDA_TOKEN     = process.env.OANDA_TOKEN;
-const ACCOUNT_ID      = process.env.OANDA_ACCOUNT_ID;
-const USE_PRACTICE    = process.env.OANDA_USE_PRACTICE !== 'false';
-const BASE_URL        = USE_PRACTICE
-  ? 'https://api-fxpractice.oanda.com'
-  : 'https://api-fxtrade.oanda.com';
+const API_KEY       = process.env.CAPITAL_API_KEY;
+const EMAIL         = process.env.CAPITAL_EMAIL;
+const API_PASS      = process.env.CAPITAL_PASS;
+const USE_DEMO      = process.env.CAPITAL_USE_DEMO !== 'false';
+const BASE_URL      = USE_DEMO
+  ? 'https://demo-api-capital.backend-capital.com/'
+  : 'https://api-capital.backend-capital.com/';
 
-const INSTRUMENT      = process.env.INSTRUMENT      || 'XAU_USD';
-const TIMEFRAME       = process.env.TIMEFRAME       || 'M15';
-const CAPITAL_TOTAL   = parseFloat(process.env.CAPITAL_TOTAL   || '10000');
-const RISK_PERC       = parseFloat(process.env.RISK_PERC       || '1');
-const SMA_PERIOD      = parseInt(process.env.SMA_PERIOD        || '20');
-const SLOPE_THRESHOLD = parseFloat(process.env.SLOPE_THRESHOLD || '0.5');
-const SL_POINTS       = parseFloat(process.env.SL_POINTS       || '2.0');
-const TRAILING_BUFFER = parseFloat(process.env.TRAILING_BUFFER || '0.5');
-const TP1_RATIO       = parseFloat(process.env.TP1_RATIO       || '2.0');
-const TP1_CLOSE_PERC  = parseFloat(process.env.TP1_CLOSE_PERC  || '80');
-const DAILY_LOSS_PERC = parseFloat(process.env.DAILY_LOSS_PERC || '5');
-const PORT            = parseInt(process.env.PORT              || '8000');
-const WEBHOOK_URL     = process.env.WEBHOOK_URL || '';
+const EPIC          = process.env.EPIC          || 'GOLD';
+const TIMEFRAME     = process.env.TIMEFRAME     || 'M15';
+const CAPITAL_TOTAL = parseFloat(process.env.CAPITAL_TOTAL   || '10000');
+const RISK_PERC     = parseFloat(process.env.RISK_PERC       || '1');
+const SMA_PERIOD    = parseInt(process.env.SMA_PERIOD        || '20');
+const SLOPE_THRESHOLD= parseFloat(process.env.SLOPE_THRESHOLD|| '0.5');
+const SL_POINTS     = parseFloat(process.env.SL_POINTS       || '2.0');
+const TRAILING_BUFFER= parseFloat(process.env.TRAILING_BUFFER|| '0.5');
+const TP1_RATIO     = parseFloat(process.env.TP1_RATIO       || '2.0');
+const TP1_CLOSE_PERC= parseFloat(process.env.TP1_CLOSE_PERC  || '80');
+const DAILY_LOSS_PERC= parseFloat(process.env.DAILY_LOSS_PERC|| '5');
+const SIZE_FACTOR   = parseFloat(process.env.SIZE_FACTOR     || '1.0');
+const MIN_SIZE      = parseFloat(process.env.MIN_SIZE        || '0.1');
+const PORT          = parseInt(process.env.PORT              || '8000');
+const WEBHOOK_URL   = process.env.WEBHOOK_URL || '';
+
+// Timeframe mapping: M15 → MINUTE_15 (Capital.com format)
+const TF_MAP = {
+  M1: 'MINUTE', M5: 'MINUTE_5', M15: 'MINUTE_15',
+  M30: 'MINUTE_30', H1: 'HOUR', H4: 'HOUR_4', D1: 'DAY', W1: 'WEEK'
+};
+const TF_MINUTES_MAP = {
+  MINUTE: 1, MINUTE_5: 5, MINUTE_15: 15, MINUTE_30: 30,
+  HOUR: 60, HOUR_4: 240, DAY: 1440, WEEK: 10080
+};
+const RESOLUTION  = TF_MAP[TIMEFRAME] || 'MINUTE_15';
+const TF_MINUTES  = TF_MINUTES_MAP[RESOLUTION] || 15;
 
 const TRADES_FILE = join(ROOT, 'trades.json');
 
-if (!OANDA_TOKEN || !ACCOUNT_ID) {
-  console.error('FATAL: OANDA_TOKEN and OANDA_ACCOUNT_ID are required in .env');
+if (!API_KEY || !EMAIL || !API_PASS) {
+  console.error('FATAL: CAPITAL_API_KEY, CAPITAL_EMAIL e CAPITAL_PASS são obrigatórios no .env');
   process.exit(1);
 }
 
@@ -46,148 +61,167 @@ let isWarmingUp  = true;
 let lastCandleTime = null;
 let candleCache  = [];
 
-// Active position (null when flat)
+// Active position (null = flat)
+// Estratégia de saída em 2 fases:
+//   Fase 1: posição completa até TP1
+//   Fase 2: fecha posição, reabre com 20% do size original + SL em breakeven + trailing
 let position = null;
 // {
-//   tradeId: string,       — OANDA trade ID
-//   side: 'buy'|'sell',
-//   units: number,         — original units
-//   remainingUnits: number,— units still open
-//   entryPrice: number,
-//   sl: number,            — current SL price
-//   tp1Price: number,
-//   tp1Hit: boolean,
-//   isBreakeven: boolean
+//   dealId:       string,
+//   side:         'buy'|'sell',
+//   fullSize:     number,   — tamanho original (100%)
+//   currentSize:  number,   — tamanho atual (100% → 20% após TP1)
+//   entryPrice:   number,
+//   sl:           number,
+//   tp1Price:     number,
+//   tp1Hit:       boolean,
+//   isBreakeven:  boolean
 // }
 
-// ─── Logging ──────────────────────────────────────────────────────────────────
-function log(msg, level = 'info') {
-  const ts = new Date().toISOString();
-  const prefix = { info: '[INFO]', warning: '[WARNING]', error: '[ERROR]', system: '===' }[level] || '[INFO]';
-  const line = `${ts} ${prefix} ${msg}`;
-  console.log(line);
-  logs.push(line);
-  if (logs.length > 50) logs.shift();
+// ─── Session ──────────────────────────────────────────────────────────────────
+let session = { cst: null, securityToken: null, lastRefresh: 0 };
+
+async function createSession() {
+  const res = await fetch(`${BASE_URL}api/v1/session`, {
+    method: 'POST',
+    headers: { 'X-CAP-API-KEY': API_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier: EMAIL, password: API_PASS, encryptedPassword: false })
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Falha na sessão Capital.com (${res.status}): ${err}`);
+  }
+  session.cst           = res.headers.get('CST');
+  session.securityToken = res.headers.get('X-SECURITY-TOKEN');
+  session.lastRefresh   = Date.now();
+  log('Sessão Capital.com iniciada', 'system');
 }
 
-// ─── Webhook ──────────────────────────────────────────────────────────────────
-async function sendWebhook(content) {
-  if (!WEBHOOK_URL) return;
-  try {
-    await fetch(WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content })
-    });
-  } catch (e) {
-    log(`Webhook error: ${e.message}`, 'error');
+async function ensureSession() {
+  // Renova sessão a cada 8 minutos (expira em 10)
+  if (!session.cst || Date.now() - session.lastRefresh > 8 * 60 * 1000) {
+    await createSession();
   }
 }
 
-// ─── OANDA REST V20 ───────────────────────────────────────────────────────────
-async function oandaRequest(method, path, body = null) {
+// ─── Capital.com REST API ─────────────────────────────────────────────────────
+async function capitalRequest(method, path, body = null) {
+  await ensureSession();
   const opts = {
     method,
     headers: {
-      'Authorization': `Bearer ${OANDA_TOKEN}`,
-      'Content-Type': 'application/json',
-      'Accept-Datetime-Format': 'UNIX'
+      'X-CAP-API-KEY':    API_KEY,
+      'CST':              session.cst,
+      'X-SECURITY-TOKEN': session.securityToken,
+      'Content-Type':     'application/json'
     }
   };
   if (body) opts.body = JSON.stringify(body);
 
-  const res = await fetch(`${BASE_URL}${path}`, opts);
+  const res = await fetch(`${BASE_URL}api/v1${path}`, opts);
+
+  // A Capital.com atualiza os tokens a cada resposta
+  if (res.headers.get('CST'))              session.cst           = res.headers.get('CST');
+  if (res.headers.get('X-SECURITY-TOKEN')) session.securityToken = res.headers.get('X-SECURITY-TOKEN');
+  session.lastRefresh = Date.now();
+
+  // DELETE /positions retorna 200 sem body
+  if (res.status === 200 && res.headers.get('content-length') === '0') return {};
+
   const data = await res.json();
-  if (!res.ok) throw new Error(`OANDA ${res.status}: ${JSON.stringify(data)}`);
+  if (!res.ok) throw new Error(`Capital.com ${res.status}: ${JSON.stringify(data)}`);
   return data;
 }
 
-async function getCandles(count = 500) {
-  const data = await oandaRequest(
-    'GET',
-    `/v3/instruments/${INSTRUMENT}/candles?granularity=${TIMEFRAME}&count=${count}&price=M`
-  );
-  return data.candles
-    .filter(c => c.complete)
-    .map(c => ({
-      time:   parseInt(c.time),
-      open:   parseFloat(c.mid.o),
-      high:   parseFloat(c.mid.h),
-      low:    parseFloat(c.mid.l),
-      close:  parseFloat(c.mid.c),
-      volume: c.volume
-    }));
+// ─── Market Data ──────────────────────────────────────────────────────────────
+function parseCapTime(str) {
+  // "2024/01/15 14:30:00" → Unix segundos (UTC)
+  return Math.floor(new Date(str.replace(/\//g, '-').replace(' ', 'T') + 'Z').getTime() / 1000);
 }
 
-async function getAccountSummary() {
-  const data = await oandaRequest('GET', `/v3/accounts/${ACCOUNT_ID}/summary`);
+async function getCandles(count = 500) {
+  const data = await capitalRequest('GET', `/prices/${EPIC}?resolution=${RESOLUTION}&max=${Math.min(count, 1000)}`);
+  const nowSecs = Date.now() / 1000;
+
+  return data.prices
+    .map(p => {
+      const time = parseCapTime(p.snapshotTimeUTC);
+      return {
+        time,
+        open:   (p.openPrice.bid  + p.openPrice.ask)  / 2,
+        high:   (p.highPrice.bid  + p.highPrice.ask)  / 2,
+        low:    (p.lowPrice.bid   + p.lowPrice.ask)   / 2,
+        close:  (p.closePrice.bid + p.closePrice.ask) / 2,
+        volume: p.lastTradedVolume || 0
+      };
+    })
+    // Filtra candle atual em formação
+    .filter(c => c.time + TF_MINUTES * 60 < nowSecs);
+}
+
+async function getAccountBalance() {
+  const data = await capitalRequest('GET', '/accounts');
+  const acc  = data.accounts.find(a => a.preferred) || data.accounts[0];
+  return parseFloat(acc?.balance?.available ?? 0);
+}
+
+// ─── Order Execution ──────────────────────────────────────────────────────────
+async function placeOrder(side, size, slPrice) {
+  const body = {
+    epic:          EPIC,
+    direction:     side.toUpperCase(),
+    size:          parseFloat(size.toFixed(2)),
+    guaranteedStop: false,
+    stopLevel:     parseFloat(slPrice.toFixed(3))
+  };
+
+  const result = await capitalRequest('POST', '/positions', body);
+
+  // Aguarda processamento antes de confirmar
+  await sleep(800);
+  const confirm = await capitalRequest('GET', `/confirms/${result.dealReference}`);
+
+  if (confirm.status !== 'OPEN' && confirm.reason !== 'SUCCESS') {
+    throw new Error(`Ordem não aberta: ${JSON.stringify(confirm)}`);
+  }
+
   return {
-    balance:       parseFloat(data.account.balance),
-    unrealizedPnL: parseFloat(data.account.unrealizedPL),
-    nav:           parseFloat(data.account.NAV)
+    dealId:     confirm.dealId,
+    entryPrice: parseFloat(confirm.level),
+    size:       parseFloat(confirm.size)
   };
 }
 
-async function getOpenTrade(tradeId) {
+async function modifyStopLoss(dealId, newSl) {
+  return capitalRequest('PUT', `/positions/${dealId}`, {
+    stopLevel: parseFloat(newSl.toFixed(3))
+  });
+}
+
+async function closePositionDeal(dealId) {
+  return capitalRequest('DELETE', `/positions/${dealId}`);
+}
+
+async function getOpenPosition(dealId) {
   try {
-    const data = await oandaRequest('GET', `/v3/accounts/${ACCOUNT_ID}/trades/${tradeId}`);
-    return data.trade;
+    const data = await capitalRequest('GET', '/positions');
+    return data.positions?.find(p => p.position.dealId === dealId) ?? null;
   } catch {
     return null;
   }
-}
-
-async function placeMarketOrder(side, units, slPrice) {
-  // OANDA: positive units = buy (long), negative = sell (short)
-  const signedUnits = side === 'buy'
-    ? String(Math.abs(Math.round(units)))
-    : String(-Math.abs(Math.round(units)));
-
-  return oandaRequest('POST', `/v3/accounts/${ACCOUNT_ID}/orders`, {
-    order: {
-      units:         signedUnits,
-      instrument:    INSTRUMENT,
-      timeInForce:   'FOK',
-      type:          'MARKET',
-      positionFill:  'DEFAULT',
-      stopLossOnFill: {
-        price:       slPrice.toFixed(3),
-        timeInForce: 'GTC'
-      }
-    }
-  });
-}
-
-async function modifyTradeSL(tradeId, newSl) {
-  return oandaRequest('PATCH', `/v3/accounts/${ACCOUNT_ID}/trades/${tradeId}/orders`, {
-    stopLoss: {
-      price:       newSl.toFixed(3),
-      timeInForce: 'GTC'
-    }
-  });
-}
-
-// Partial or full close of a trade
-async function closeTrade(tradeId, units = null) {
-  const body = units
-    ? { units: String(Math.abs(Math.round(units))) }
-    : {};
-  return oandaRequest('PUT', `/v3/accounts/${ACCOUNT_ID}/trades/${tradeId}/close`, body);
 }
 
 // ─── Indicators ───────────────────────────────────────────────────────────────
 function calcSMA(closes, period) {
   return closes.map((_, i) => {
     if (i < period - 1) return null;
-    const slice = closes.slice(i - period + 1, i + 1);
-    return slice.reduce((a, b) => a + b, 0) / period;
+    const s = closes.slice(i - period + 1, i + 1);
+    return s.reduce((a, b) => a + b, 0) / period;
   });
 }
 
 // ─── Signal Engine ────────────────────────────────────────────────────────────
-// Strategy: SMA 20 Trend Following with Pullback + Price Action Trigger
-// Long:  slope up > threshold, prev candle low touches SMA, trigger candle breaks prev high
-// Short: slope down > threshold, prev candle high touches SMA, trigger candle breaks prev low
+// SMA 20 Trend Following com Pullback + Price Action
 function detectSignal(candles) {
   if (candles.length < SMA_PERIOD + 5) return null;
 
@@ -195,24 +229,22 @@ function detectSignal(candles) {
   const sma    = calcSMA(closes, SMA_PERIOD);
   const n      = candles.length;
 
-  const smaNow   = sma[n - 1]; // SMA at trigger candle
-  const smaPrev  = sma[n - 2]; // SMA at pivot candle
-  const sma3Bars = sma[n - 4]; // SMA 3 bars ago (slope reference)
+  const smaNow   = sma[n - 1];
+  const smaPrev  = sma[n - 2];
+  const sma3Bars = sma[n - 4];
 
   if (!smaNow || !smaPrev || !sma3Bars) return null;
 
-  const trigger = candles[n - 1]; // current closed candle (entry trigger)
-  const pivot   = candles[n - 2]; // previous candle (touched SMA)
+  const trigger = candles[n - 1];
+  const pivot   = candles[n - 2];
 
-  const slope = smaNow - sma3Bars;
+  const slope     = smaNow - sma3Bars;
   const uptrend   = slope >  SLOPE_THRESHOLD;
   const downtrend = slope < -SLOPE_THRESHOLD;
 
-  // Pullback: pivot candle must have touched the SMA
-  const touchedLow  = pivot.low  <= smaPrev; // price dipped to SMA (for longs)
-  const touchedHigh = pivot.high >= smaPrev; // price spiked to SMA (for shorts)
+  const touchedLow  = pivot.low  <= smaPrev;
+  const touchedHigh = pivot.high >= smaPrev;
 
-  // Trigger: direction candle that breaks pivot's extreme
   const bullClose  = trigger.close > trigger.open;
   const bearClose  = trigger.close < trigger.open;
   const longEntry  = bullClose && trigger.high > pivot.high;
@@ -224,19 +256,18 @@ function detectSignal(candles) {
 }
 
 // ─── Risk Manager ─────────────────────────────────────────────────────────────
-function calcUnits(entryPrice, slPrice) {
+function calcSize(entryPrice, slPrice) {
   const riskAmount = equity * (RISK_PERC / 100);
-  const slDistance = Math.abs(entryPrice - slPrice);
-  if (slDistance < 0.001) return 0;
-  // For XAU_USD: 1 unit = 1 troy oz → P&L = price_move * units
-  return Math.floor(riskAmount / slDistance);
+  const slDist     = Math.abs(entryPrice - slPrice);
+  if (slDist < 0.001) return 0;
+  const raw = (riskAmount / slDist) / SIZE_FACTOR;
+  return Math.max(MIN_SIZE, parseFloat(raw.toFixed(1)));
 }
 
-function calcSLPrice(side, pivotCandle) {
-  // SL goes beyond the pivot candle's extreme with a small buffer
+function calcSLPrice(side, pivot) {
   return side === 'buy'
-    ? pivotCandle.low  - SL_POINTS
-    : pivotCandle.high + SL_POINTS;
+    ? pivot.low  - SL_POINTS
+    : pivot.high + SL_POINTS;
 }
 
 // ─── Persistence ──────────────────────────────────────────────────────────────
@@ -257,96 +288,116 @@ function rebuildEquity() {
   for (const t of trades) {
     if (typeof t.pnl === 'number' && !isNaN(t.pnl)) equity += t.pnl;
   }
-  log(`Equity rebuilt: $${equity.toFixed(2)} from ${trades.length} trades`, 'system');
+  log(`Equity reconstruído: $${equity.toFixed(2)} de ${trades.length} trades`, 'system');
+}
+
+// ─── Logging & Webhook ────────────────────────────────────────────────────────
+function log(msg, level = 'info') {
+  const prefix = { info: '[INFO]', warning: '[WARNING]', error: '[ERROR]', system: '===' }[level] || '[INFO]';
+  const line   = `${new Date().toISOString()} ${prefix} ${msg}`;
+  console.log(line);
+  logs.push(line);
+  if (logs.length > 50) logs.shift();
+}
+
+async function sendWebhook(content) {
+  if (!WEBHOOK_URL) return;
+  try {
+    await fetch(WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content })
+    });
+  } catch (e) { log(`Webhook error: ${e.message}`, 'error'); }
 }
 
 // ─── Trade Execution ──────────────────────────────────────────────────────────
 async function enterTrade(signal, candles) {
   if (position) return;
 
-  const n         = candles.length;
-  const pivot     = candles[n - 2];
-  const trigger   = candles[n - 1];
-  const slPrice   = calcSLPrice(signal, pivot);
-  const entryEst  = trigger.close; // estimate for sizing (actual fill may differ)
-  const units     = calcUnits(entryEst, slPrice);
+  const n       = candles.length;
+  const pivot   = candles[n - 2];
+  const trigger = candles[n - 1];
+  const slPrice = calcSLPrice(signal, pivot);
+  const estSize = calcSize(trigger.close, slPrice);
 
-  if (units < 1) {
-    log(`Insufficient units (${units}) for risk config. Skipping.`, 'warning');
+  if (estSize < MIN_SIZE) {
+    log(`Tamanho muito pequeno (${estSize}). Pulando entrada.`, 'warning');
     return;
   }
 
-  const slDist  = Math.abs(entryEst - slPrice);
+  const slDist   = Math.abs(trigger.close - slPrice);
   const tp1Price = signal === 'buy'
-    ? entryEst + slDist * TP1_RATIO
-    : entryEst - slDist * TP1_RATIO;
+    ? trigger.close + slDist * TP1_RATIO
+    : trigger.close - slDist * TP1_RATIO;
 
-  log(`SIGNAL ${signal.toUpperCase()} | Est. Entry: ${entryEst} | SL: ${slPrice.toFixed(3)} | TP1: ${tp1Price.toFixed(3)} | Units: ${units}`, 'system');
+  log(`SINAL ${signal.toUpperCase()} | Est. Entrada: ${trigger.close.toFixed(3)} | SL: ${slPrice.toFixed(3)} | TP1: ${tp1Price.toFixed(3)} | Size: ${estSize}`, 'system');
 
   try {
-    const result = await placeMarketOrder(signal, units, slPrice);
-    const fill   = result.orderFillTransaction;
+    const fill = await placeOrder(signal, estSize, slPrice);
 
-    if (!fill) throw new Error('Order not filled — ' + JSON.stringify(result));
-
-    const filledPrice = parseFloat(fill.price);
-    const tradeId     = fill.tradeOpened?.tradeID;
-
-    if (!tradeId) throw new Error('No tradeID in fill response');
-
-    // Recalculate TP1 using actual fill price
-    const actualSlDist = Math.abs(filledPrice - slPrice);
+    // Recalcula TP1 com preço real de entrada
+    const actualSlDist = Math.abs(fill.entryPrice - slPrice);
     const actualTp1    = signal === 'buy'
-      ? filledPrice + actualSlDist * TP1_RATIO
-      : filledPrice - actualSlDist * TP1_RATIO;
+      ? fill.entryPrice + actualSlDist * TP1_RATIO
+      : fill.entryPrice - actualSlDist * TP1_RATIO;
 
     position = {
-      tradeId,
-      side:           signal,
-      units,
-      remainingUnits: units,
-      entryPrice:     filledPrice,
-      sl:             slPrice,
-      tp1Price:       actualTp1,
-      tp1Hit:         false,
-      isBreakeven:    false
+      dealId:      fill.dealId,
+      side:        signal,
+      fullSize:    fill.size,
+      currentSize: fill.size,
+      entryPrice:  fill.entryPrice,
+      sl:          slPrice,
+      tp1Price:    actualTp1,
+      tp1Hit:      false,
+      isBreakeven: false
     };
 
     saveTrade({
-      id:        fill.id,
+      id:        fill.dealId,
       timestamp: Date.now(),
       datetime:  new Date().toISOString(),
       side:      signal,
       type:      'entry',
-      price:     filledPrice,
-      units,
+      price:     fill.entryPrice,
+      size:      fill.size,
       sl:        slPrice,
       tp1:       actualTp1,
       pnl:       null
     });
 
     await sendWebhook(
-      `**ENTRADA ${signal.toUpperCase()} XAU/USD**\n` +
-      `Preço: ${filledPrice} | SL: ${slPrice.toFixed(3)} | TP1: ${actualTp1.toFixed(3)}\n` +
-      `Unidades: ${units} | Equity: $${equity.toFixed(2)}`
+      `**ENTRADA ${signal.toUpperCase()} ${EPIC}**\n` +
+      `Preço: ${fill.entryPrice} | SL: ${slPrice.toFixed(3)} | TP1: ${actualTp1.toFixed(3)}\n` +
+      `Size: ${fill.size} | Equity: $${equity.toFixed(2)}`
     );
-    log(`Trade aberto: ID ${tradeId} @ ${filledPrice}`, 'info');
+    log(`Posição aberta: Deal ${fill.dealId} @ ${fill.entryPrice}`, 'info');
 
   } catch (e) {
     log(`Erro ao abrir ordem: ${e.message}`, 'error');
-    await sendWebhook(`**ERRO** ao abrir ordem ${signal.toUpperCase()}: ${e.message}`);
+    await sendWebhook(`**ERRO** ao abrir ${signal.toUpperCase()} ${EPIC}: ${e.message}`);
   }
 }
 
 async function managePosition(candles) {
   if (!position) return;
 
-  const trade = await getOpenTrade(position.tradeId);
+  const openPos = await getOpenPosition(position.dealId);
 
-  // Trade was closed externally (SL hit, manual close, etc.)
-  if (!trade || trade.state !== 'OPEN') {
-    const realizedPnL = trade ? parseFloat(trade.realizedPL || 0) : 0;
-    log(`Trade ${position.tradeId} fechado externamente. PnL: $${realizedPnL.toFixed(2)}`, 'system');
+  // Posição fechada externamente (SL atingido ou fechamento manual)
+  if (!openPos) {
+    log(`Posição ${position.dealId} fechada externamente`, 'system');
+
+    const closedPl = 0; // sem PnL real disponível aqui — atualiza equity no próximo /accounts
+    try {
+      const bal = await getAccountBalance();
+      const pl  = bal - equity;
+      equity    = bal;
+      dailyPnL += pl;
+      log(`PnL estimado: $${pl.toFixed(2)} | Equity: $${equity.toFixed(2)}`, 'info');
+      await sendWebhook(`**SAÍDA (SL/Manual)** ${EPIC} | Equity: $${equity.toFixed(2)}`);
+    } catch {}
 
     saveTrade({
       id:        `close_${Date.now()}`,
@@ -355,13 +406,10 @@ async function managePosition(candles) {
       side:      position.side === 'buy' ? 'sell' : 'buy',
       type:      'stop_loss',
       price:     0,
-      units:     position.remainingUnits,
-      pnl:       realizedPnL
+      size:      position.currentSize,
+      pnl:       null
     });
 
-    dailyPnL += realizedPnL;
-    equity   += realizedPnL;
-    await sendWebhook(`**SAÍDA (SL)** XAU/USD | PnL: $${realizedPnL.toFixed(2)} | Equity: $${equity.toFixed(2)}`);
     position = null;
     return;
   }
@@ -370,68 +418,80 @@ async function managePosition(candles) {
   const currentPrice = candles[n - 1].close;
   const prevCandle   = candles[n - 2];
 
-  // ── TP1: partial close ────────────────────────────────────────────────────
+  // ── TP1: fecha posição atual e reabre com 20% + breakeven ─────────────────
   if (!position.tp1Hit) {
     const tp1Reached = position.side === 'buy'
       ? currentPrice >= position.tp1Price
       : currentPrice <= position.tp1Price;
 
     if (tp1Reached) {
-      const closeUnits = Math.floor(position.remainingUnits * TP1_CLOSE_PERC / 100);
       try {
-        const result     = await closeTrade(position.tradeId, closeUnits);
-        const fillTx     = result.orderFillTransaction;
-        const closePrice = fillTx ? parseFloat(fillTx.price) : currentPrice;
-        const pl         = fillTx?.pl ? parseFloat(fillTx.pl) : 0;
+        await closePositionDeal(position.dealId);
 
-        position.remainingUnits -= closeUnits;
-        position.tp1Hit          = true;
-
-        await modifyTradeSL(position.tradeId, position.entryPrice);
-        position.sl          = position.entryPrice;
-        position.isBreakeven = true;
+        // PnL estimado do fechamento no TP1
+        const slDist     = Math.abs(position.entryPrice - position.sl);
+        const estimatedPl = slDist * TP1_RATIO * position.currentSize;
+        equity   += estimatedPl;
+        dailyPnL += estimatedPl;
 
         saveTrade({
           id:        `tp1_${Date.now()}`,
           timestamp: Date.now(),
           datetime:  new Date().toISOString(),
           side:      position.side === 'buy' ? 'sell' : 'buy',
-          type:      'partial_tp',
-          price:     closePrice,
-          units:     closeUnits,
-          pnl:       pl
+          type:      'tp1_close',
+          price:     position.tp1Price,
+          size:      position.currentSize,
+          pnl:       estimatedPl
         });
 
-        dailyPnL += pl;
-        equity   += pl;
+        log(`TP1 atingido! Posição fechada. PnL est.: $${estimatedPl.toFixed(2)}`, 'system');
 
-        log(`TP1 atingido! Fechado ${closeUnits} units @ ${closePrice}. Restando: ${position.remainingUnits}. SL → Breakeven`, 'system');
+        // Reabre 20% com SL em breakeven
+        const trailSize = Math.max(MIN_SIZE, parseFloat((position.fullSize * (1 - TP1_CLOSE_PERC / 100)).toFixed(2)));
+        const beSL      = position.entryPrice;
+
+        await sleep(1000);
+        const fill2 = await placeOrder(position.side, trailSize, beSL);
+
+        position = {
+          dealId:      fill2.dealId,
+          side:        position.side,
+          fullSize:    position.fullSize,
+          currentSize: fill2.size,
+          entryPrice:  fill2.entryPrice,
+          sl:          beSL,
+          tp1Price:    position.tp1Price,
+          tp1Hit:      true,
+          isBreakeven: true
+        };
+
+        log(`Trailing aberto: Deal ${fill2.dealId} | Size: ${fill2.size} | SL (BE): ${beSL.toFixed(3)}`, 'info');
         await sendWebhook(
-          `**TP1 XAU/USD** | ${closeUnits} units @ ${closePrice}\n` +
-          `SL movido para breakeven | PnL parcial: $${pl.toFixed(2)}`
+          `**TP1 ${EPIC}** | PnL est.: +$${estimatedPl.toFixed(2)}\n` +
+          `Trailing aberto (${trailSize} units) com SL em breakeven`
         );
+
       } catch (e) {
-        log(`Erro no fechamento TP1: ${e.message}`, 'error');
+        log(`Erro no TP1: ${e.message}`, 'error');
       }
       return;
     }
   }
 
-  // ── Trailing stop (after TP1, on remaining units) ─────────────────────────
-  if (position.tp1Hit && position.remainingUnits > 0) {
+  // ── Trailing stop (após TP1, na posição reaberta) ─────────────────────────
+  if (position.tp1Hit && position.currentSize > 0) {
     let newSl;
     if (position.side === 'buy') {
-      // Trail SL to previous candle's low minus buffer, only if higher than current SL
       newSl = prevCandle.low - TRAILING_BUFFER;
-      if (newSl <= position.sl) return; // never move SL against the trade
+      if (newSl <= position.sl) return;
     } else {
-      // Trail SL to previous candle's high plus buffer, only if lower than current SL
       newSl = prevCandle.high + TRAILING_BUFFER;
       if (newSl >= position.sl) return;
     }
 
     try {
-      await modifyTradeSL(position.tradeId, newSl);
+      await modifyStopLoss(position.dealId, newSl);
       log(`Trailing SL: ${position.sl.toFixed(3)} → ${newSl.toFixed(3)}`, 'info');
       position.sl = newSl;
     } catch (e) {
@@ -444,7 +504,7 @@ async function managePosition(candles) {
 function checkDailyReset() {
   const today = new Date().toDateString();
   if (today !== dailyDate) {
-    log(`Novo dia. PnL do dia anterior: $${dailyPnL.toFixed(2)}. Resetando.`, 'system');
+    log(`Novo dia. PnL anterior: $${dailyPnL.toFixed(2)}`, 'system');
     dailyPnL  = 0;
     dailyDate = today;
   }
@@ -468,7 +528,6 @@ async function tick() {
 
     candleCache = isWarmingUp ? candles : [...candleCache.slice(-490), ...candles.slice(-10)];
 
-    // Warm-up: load history, calibrate, don't trade
     if (isWarmingUp) {
       isWarmingUp    = false;
       lastCandleTime = candles[candles.length - 1].time;
@@ -477,33 +536,32 @@ async function tick() {
     }
 
     const latestTime = candles[candles.length - 1].time;
-    if (latestTime === lastCandleTime) return; // same candle, nothing new
+    if (latestTime === lastCandleTime) return;
     lastCandleTime = latestTime;
 
-    const latest = candles[candles.length - 1];
-    log(`Novo candle: ${new Date(latestTime * 1000).toISOString().slice(0, 16)} | O:${latest.open} H:${latest.high} L:${latest.low} C:${latest.close}`, 'info');
+    const c = candles[candles.length - 1];
+    log(`Novo candle: ${new Date(latestTime * 1000).toISOString().slice(0, 16)} | O:${c.open.toFixed(2)} H:${c.high.toFixed(2)} L:${c.low.toFixed(2)} C:${c.close.toFixed(2)}`, 'info');
 
-    // Manage open position first
     if (position) {
       await managePosition(candleCache);
       return;
     }
 
-    // Circuit breaker
     if (isDailyLimitHit()) {
-      log('Limite diário de perda atingido. Sem novas entradas hoje.', 'warning');
+      log('Limite diário atingido. Sem novas entradas.', 'warning');
       return;
     }
 
-    // Detect entry signal
     const signal = detectSignal(candleCache);
     if (signal) {
-      log(`Sinal detectado: ${signal.toUpperCase()}`, 'info');
+      log(`Sinal: ${signal.toUpperCase()}`, 'info');
       await enterTrade(signal, candleCache);
     }
 
   } catch (e) {
     log(`Erro no tick: ${e.message}`, 'error');
+    // Sessão pode ter expirado — força renovação no próximo tick
+    session.lastRefresh = 0;
   }
 }
 
@@ -513,7 +571,6 @@ function startHttpServer() {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Content-Type', 'application/json');
-
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
     const url = req.url.split('?')[0];
@@ -522,39 +579,24 @@ function startHttpServer() {
       const last = candleCache[candleCache.length - 1];
       res.writeHead(200);
       res.end(JSON.stringify({
-        instrument:   INSTRUMENT,
+        broker:       'Capital.com',
+        epic:         EPIC,
         timeframe:    TIMEFRAME,
         currentPrice: last?.close ?? null,
         equity:       parseFloat(equity.toFixed(2)),
         dailyPnL:     parseFloat(dailyPnL.toFixed(2)),
         position,
         isWarmingUp,
-        usePractice:  USE_PRACTICE,
+        useDemo:      USE_DEMO,
         config: { SMA_PERIOD, SLOPE_THRESHOLD, SL_POINTS, TRAILING_BUFFER, TP1_RATIO, TP1_CLOSE_PERC, RISK_PERC, DAILY_LOSS_PERC }
       }));
       return;
     }
+    if (url === '/trades')  { res.writeHead(200); res.end(JSON.stringify(trades)); return; }
+    if (url === '/logs')    { res.writeHead(200); res.end(JSON.stringify(logs));   return; }
+    if (url === '/candles') { res.writeHead(200); res.end(JSON.stringify(candleCache)); return; }
 
-    if (url === '/trades') {
-      res.writeHead(200);
-      res.end(JSON.stringify(trades));
-      return;
-    }
-
-    if (url === '/logs') {
-      res.writeHead(200);
-      res.end(JSON.stringify(logs));
-      return;
-    }
-
-    if (url === '/candles') {
-      res.writeHead(200);
-      res.end(JSON.stringify(candleCache));
-      return;
-    }
-
-    res.writeHead(404);
-    res.end(JSON.stringify({ error: 'Not found' }));
+    res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' }));
   });
 
   server.listen(PORT, () => log(`Servidor HTTP na porta ${PORT}`, 'system'));
@@ -562,23 +604,21 @@ function startHttpServer() {
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 async function main() {
-  log(`=== XAU/USD OANDA Robot v1.0 ===`, 'system');
-  log(`Ambiente: ${USE_PRACTICE ? 'PRACTICE' : 'LIVE'} | ${INSTRUMENT} ${TIMEFRAME}`, 'system');
-  log(`Risco: ${RISK_PERC}% por trade | SMA(${SMA_PERIOD}) | SL: ${SL_POINTS} pts`, 'system');
+  log(`=== XAU/USD Capital.com Robot v2.0 ===`, 'system');
+  log(`Ambiente: ${USE_DEMO ? 'DEMO' : 'LIVE'} | ${EPIC} ${TIMEFRAME}`, 'system');
+  log(`Risco: ${RISK_PERC}% | SMA(${SMA_PERIOD}) | SL: ${SL_POINTS} pts | TP1: ${TP1_RATIO}:1`, 'system');
 
   rebuildEquity();
+  await createSession(); // sessão inicial
   startHttpServer();
 
-  log('Iniciando warm-up histórico...', 'system');
-  await tick(); // loads 500 candles, sets isWarmingUp = false
+  log('Iniciando warm-up...', 'system');
+  await tick();
 
   while (true) {
     await tick();
-    await sleep(30_000); // poll every 30s (half a minute — well within 15m candle)
+    await sleep(30_000);
   }
 }
 
-main().catch(e => {
-  console.error('Erro fatal:', e);
-  process.exit(1);
-});
+main().catch(e => { console.error('Erro fatal:', e); process.exit(1); });

@@ -200,8 +200,9 @@ function updateStats(status) {
   setStatValue('stat-sma',  status.config?.SMA_PERIOD  ?? '—');
   setStatValue('stat-risk', `${status.config?.RISK_PERC ?? '—'}%`);
 
-  document.getElementById('env-badge').className  = `badge ${status.usePractice ? 'practice' : 'live'}`;
-  document.getElementById('env-badge').textContent = status.usePractice ? 'PRACTICE' : 'LIVE';
+  const isDemo = status.useDemo ?? status.usePractice;
+  document.getElementById('env-badge').className  = `badge ${isDemo ? 'practice' : 'live'}`;
+  document.getElementById('env-badge').textContent = isDemo ? 'DEMO' : 'LIVE';
   document.getElementById('tf-badge').textContent  = status.timeframe ?? '—';
 }
 
