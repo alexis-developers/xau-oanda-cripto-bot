@@ -153,7 +153,6 @@ let dailyDate     = new Date().toDateString();
 let isWarmingUp   = true;
 let candleCache   = [];
 let formingCandle = null;
-let httpStarted   = false;
 
 // Posição ativa
 let position = null;
@@ -634,6 +633,18 @@ async function subscribeBalance() {
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// Re-tenta a subscrição quando o mercado está fechado (fim de semana, feriados)
+let subRetryTimer = null;
+function trySubscribeCandles() {
+  clearTimeout(subRetryTimer);
+  subscribeCandles().catch(e => {
+    log(`Subscrição de candles falhou: ${e.message} — nova tentativa em 5 min`, 'warning');
+    subRetryTimer = setTimeout(() => {
+      if (wsReady) trySubscribeCandles();
+    }, 5 * 60 * 1000);
+  });
+}
+
 async function connectWS() {
   log('Obtendo OTP Deriv...', 'system');
   let wsUrl;
@@ -653,20 +664,19 @@ async function connectWS() {
     wsReady = true;
     try {
       await loadHistory();
-      await subscribeCandles();
     } catch (e) {
-      log(`Erro crítico WS: ${e.message}`, 'error');
-      return;
+      log(`Histórico falhou: ${e.message}`, 'error');
     }
-    // Balance subscription é opcional — não bloqueia o restante
+    // Mercado fechado não é fatal — re-tenta até abrir
+    trySubscribeCandles();
     subscribeBalance().catch(e => log(`Balance subscription: ${e.message}`, 'warning'));
-    if (!httpStarted) { startHttpServer(); httpStarted = true; }
   });
 
   ws.on('message', (data) => handleMessage(data));
 
   ws.on('close', () => {
     wsReady = false;
+    clearTimeout(subRetryTimer);
     log('WebSocket desconectado. Reconectando em 5s...', 'warning');
     msgHandlers.forEach(({ reject }) => reject(new Error('WS disconnected')));
     msgHandlers.clear();
@@ -775,6 +785,8 @@ async function main() {
   log(`=== XAU/USD Deriv Robot v5.0 — Config Dinâmica ===`, 'system');
   log(`${CFG.SYMBOL} ${CFG.TIMEFRAME} | Mult: ${CFG.MULTIPLIER}x | Stake: $${CFG.STAKE} | Trading: ${CFG.TRADING_ENABLED ? 'ON' : 'OFF'} | Conta: ${DERIV_ACCOUNT_ID}`, 'system');
   rebuildEquity();
+  // HTTP primeiro: painel funciona mesmo com mercado fechado ou WS em falha
+  startHttpServer();
   await connectWS();
 }
 
