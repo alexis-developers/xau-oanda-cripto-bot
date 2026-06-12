@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>XAU/USD — Operação Média Pro 20</title>
+  <title>Multi Trader Pro — Operação Média</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
@@ -12,7 +12,7 @@
 <body>
 
 <header>
-  <h1 id="header-title">XAU/USD — Operação Média Pro 20</h1>
+  <h1 id="header-title">Multi Trader Pro — Operação Média</h1>
   <div class="header-meta">
     <span id="trading-badge" class="badge live">TRADING OFF</span>
     <span id="env-badge" class="badge practice">PRACTICE</span>
@@ -138,17 +138,35 @@
           <div class="cfg-field">
             <span class="cfg-label">Símbolo</span>
             <select id="cfg-in-SYMBOL">
-              <option value="frxXAUUSD">Ouro (XAU/USD)</option>
-              <option value="frxXAGUSD">Prata (XAG/USD)</option>
-              <option value="frxEURUSD">EUR/USD</option>
-              <option value="frxGBPUSD">GBP/USD</option>
-              <option value="frxUSDJPY">USD/JPY</option>
-              <option value="frxAUDUSD">AUD/USD</option>
-              <option value="cryBTCUSD">Bitcoin (BTC/USD)</option>
-              <option value="cryETHUSD">Ethereum (ETH/USD)</option>
-              <option value="R_50">Volatility 50</option>
-              <option value="R_75">Volatility 75</option>
-              <option value="R_100">Volatility 100</option>
+              <optgroup label="Metais">
+                <option value="frxXAUUSD">Ouro (XAU/USD)</option>
+                <option value="frxXAGUSD">Prata (XAG/USD)</option>
+              </optgroup>
+              <optgroup label="Forex">
+                <option value="frxEURUSD">EUR/USD</option>
+                <option value="frxGBPUSD">GBP/USD</option>
+                <option value="frxUSDJPY">USD/JPY</option>
+                <option value="frxAUDUSD">AUD/USD</option>
+                <option value="frxUSDCAD">USD/CAD</option>
+                <option value="frxUSDCHF">USD/CHF</option>
+              </optgroup>
+              <optgroup label="Cripto">
+                <option value="cryBTCUSD">Bitcoin (BTC/USD)</option>
+                <option value="cryETHUSD">Ethereum (ETH/USD)</option>
+              </optgroup>
+              <optgroup label="Índices de Ações">
+                <option value="OTC_DJI">Wall Street 30 (Dow Jones)</option>
+                <option value="OTC_SPC">US 500 (S&amp;P 500)</option>
+                <option value="OTC_NDX">US Tech 100 (Nasdaq)</option>
+                <option value="OTC_FTSE">UK 100 (FTSE)</option>
+                <option value="OTC_GDAXI">Germany 40 (DAX)</option>
+              </optgroup>
+              <optgroup label="Sintéticos (24/7)">
+                <option value="R_25">Volatility 25</option>
+                <option value="R_50">Volatility 50</option>
+                <option value="R_75">Volatility 75</option>
+                <option value="R_100">Volatility 100</option>
+              </optgroup>
             </select>
             <span class="cfg-hint">Trocar reconecta o robô automaticamente</span>
           </div>

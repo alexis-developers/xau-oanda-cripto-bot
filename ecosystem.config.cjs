@@ -2,7 +2,7 @@
 module.exports = {
   apps: [
     {
-      name:        'xau-oanda-bot',
+      name:        'multi-trader-pro',
       script:      'src/robot.js',
       interpreter: 'node',
       env: {

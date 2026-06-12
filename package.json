@@ -1,7 +1,7 @@
 {
-  "name": "xau-oanda-bot",
-  "version": "1.0.0",
-  "description": "XAU/USD Trend Following Robot — Deriv WebSocket API",
+  "name": "multi-trader-pro",
+  "version": "5.0.0",
+  "description": "Multi Trader Pro — Robô universal (Cripto, Forex, Ouro, Índices) 100% configurável pelo painel — Deriv API",
   "type": "module",
   "main": "src/robot.js",
   "scripts": {

@@ -230,12 +230,16 @@ function updateStats(status) {
   const title = document.getElementById('header-title');
   if (title && status.symbol) {
     const names = {
-      frxXAUUSD: 'XAU/USD', frxXAGUSD: 'XAG/USD', frxEURUSD: 'EUR/USD',
-      frxGBPUSD: 'GBP/USD', frxUSDJPY: 'USD/JPY', frxAUDUSD: 'AUD/USD',
-      cryBTCUSD: 'BTC/USD', cryETHUSD: 'ETH/USD',
-      R_50: 'Volatility 50', R_75: 'Volatility 75', R_100: 'Volatility 100',
+      frxXAUUSD: 'Ouro (XAU/USD)',  frxXAGUSD: 'Prata (XAG/USD)',
+      frxEURUSD: 'EUR/USD',  frxGBPUSD: 'GBP/USD', frxUSDJPY: 'USD/JPY',
+      frxAUDUSD: 'AUD/USD',  frxUSDCAD: 'USD/CAD', frxUSDCHF: 'USD/CHF',
+      cryBTCUSD: 'Bitcoin (BTC/USD)', cryETHUSD: 'Ethereum (ETH/USD)',
+      OTC_DJI: 'Wall Street 30', OTC_SPC: 'US 500', OTC_NDX: 'US Tech 100',
+      OTC_FTSE: 'UK 100', OTC_GDAXI: 'Germany 40',
+      R_25: 'Volatility 25', R_50: 'Volatility 50',
+      R_75: 'Volatility 75', R_100: 'Volatility 100',
     };
-    title.textContent = `${names[status.symbol] ?? status.symbol} — Operação Média Pro 20`;
+    title.textContent = `Multi Trader Pro — ${names[status.symbol] ?? status.symbol}`;
   }
 }
 
