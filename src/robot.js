@@ -8,41 +8,146 @@ import 'dotenv/config';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 
-// ─── Config ───────────────────────────────────────────────────────────────────
-const DERIV_TOKEN     = process.env.DERIV_TOKEN;
-const DERIV_ACCOUNT_ID= process.env.DERIV_ACCOUNT_ID || 'DOT93096841';
-const APP_ID          = process.env.DERIV_APP_ID     || '33v8gypvQ2TA7ORg5HNfb';
-const SYMBOL          = process.env.SYMBOL           || 'frxXAUUSD';
-const TIMEFRAME       = process.env.TIMEFRAME        || 'M15';
-const MULTIPLIER      = parseInt(process.env.MULTIPLIER     || '100');
-const STAKE           = parseFloat(process.env.STAKE        || '10');
-const CAPITAL_TOTAL   = parseFloat(process.env.CAPITAL_TOTAL   || '10000');
-const RISK_PERC       = parseFloat(process.env.RISK_PERC       || '1');
-const SMA_PERIOD      = parseInt(process.env.SMA_PERIOD        || '20');
-const SLOPE_THRESHOLD = parseFloat(process.env.SLOPE_THRESHOLD || '0.5');
-const SL_POINTS       = parseFloat(process.env.SL_POINTS       || '2.0');
-const TRAILING_BUFFER = parseFloat(process.env.TRAILING_BUFFER || '0.5');
-const TP1_RATIO       = parseFloat(process.env.TP1_RATIO       || '2.0');
-const TP1_CLOSE_PERC  = parseFloat(process.env.TP1_CLOSE_PERC  || '80');
-const DAILY_LOSS_PERC = parseFloat(process.env.DAILY_LOSS_PERC || '5');
-const PORT            = parseInt(process.env.PORT             || '8000');
-const WEBHOOK_URL     = process.env.WEBHOOK_URL || '';
-
-// Deriv granularity (seconds)
-const GRAN_MAP = { M1:60, M5:300, M15:900, M30:1800, H1:3600, H4:14400, D1:86400 };
-const GRANULARITY = GRAN_MAP[TIMEFRAME] || 900;
-
-const TRADES_FILE = join(ROOT, 'trades.json');
+// ─── Credenciais (apenas via .env — nunca editáveis pela web) ─────────────────
+const DERIV_TOKEN      = process.env.DERIV_TOKEN;
+const DERIV_ACCOUNT_ID = process.env.DERIV_ACCOUNT_ID || 'DOT93096841';
+const APP_ID           = process.env.DERIV_APP_ID     || '33v8gypvQ2TA7ORg5HNfb';
+const PORT             = parseInt(process.env.PORT    || '8000');
 
 if (!DERIV_TOKEN) {
   console.error('FATAL: DERIV_TOKEN é obrigatório no .env');
   process.exit(1);
 }
 
+// ─── Configuração Dinâmica (estilo ProfitTrailer) ─────────────────────────────
+// Prioridade: config.json (web) > .env > defaults
+// Schema: validação de tipo/limites + flag de reconexão quando aplicável
+const CONFIG_FILE = join(ROOT, 'config.json');
+
+const CONFIG_SCHEMA = {
+  TRADING_ENABLED: { type: 'boolean', label: 'Trading Ativo' },
+  SYMBOL:          { type: 'string',  reconnect: true },
+  TIMEFRAME:       { type: 'string',  enum: ['M1','M5','M15','M30','H1','H4','D1'], reconnect: true },
+  MULTIPLIER:      { type: 'number',  min: 1,   max: 1000, int: true },
+  STAKE:           { type: 'number',  min: 1,   max: 2000 },
+  CAPITAL_TOTAL:   { type: 'number',  min: 1,   max: 100000000 },
+  RISK_PERC:       { type: 'number',  min: 0.1, max: 100 },
+  DAILY_LOSS_PERC: { type: 'number',  min: 0.1, max: 100 },
+  SMA_PERIOD:      { type: 'number',  min: 2,   max: 200, int: true },
+  SLOPE_THRESHOLD: { type: 'number',  min: 0,   max: 1000 },
+  SL_POINTS:       { type: 'number',  min: 0.1, max: 1000 },
+  TRAILING_BUFFER: { type: 'number',  min: 0,   max: 1000 },
+  TP1_RATIO:       { type: 'number',  min: 0.5, max: 20 },
+  TP1_CLOSE_PERC:  { type: 'number',  min: 0,   max: 100 },
+  WEBHOOK_URL:     { type: 'string' },
+};
+
+const DEFAULTS = {
+  TRADING_ENABLED: true,
+  SYMBOL:          'frxXAUUSD',
+  TIMEFRAME:       'M15',
+  MULTIPLIER:      100,
+  STAKE:           10,
+  CAPITAL_TOTAL:   10000,
+  RISK_PERC:       1,
+  DAILY_LOSS_PERC: 5,
+  SMA_PERIOD:      20,
+  SLOPE_THRESHOLD: 0.5,
+  SL_POINTS:       2.0,
+  TRAILING_BUFFER: 0.5,
+  TP1_RATIO:       2.0,
+  TP1_CLOSE_PERC:  80,
+  WEBHOOK_URL:     '',
+};
+
+function envOverrides() {
+  const out = {};
+  for (const key of Object.keys(CONFIG_SCHEMA)) {
+    const raw = process.env[key];
+    if (raw === undefined || raw === '') continue;
+    const spec = CONFIG_SCHEMA[key];
+    if (spec.type === 'number')       out[key] = parseFloat(raw);
+    else if (spec.type === 'boolean') out[key] = raw.toLowerCase() === 'true';
+    else                              out[key] = raw;
+  }
+  return out;
+}
+
+function loadFileConfig() {
+  if (!existsSync(CONFIG_FILE)) return {};
+  try { return JSON.parse(readFileSync(CONFIG_FILE, 'utf8')); }
+  catch { return {}; }
+}
+
+let CFG = { ...DEFAULTS, ...envOverrides(), ...loadFileConfig() };
+
+function saveConfig() {
+  writeFileSync(CONFIG_FILE, JSON.stringify(CFG, null, 2));
+}
+
+// Valida e aplica updates. Retorna { ok, errors, reconnectRequired }
+function applyConfigUpdate(updates) {
+  const errors = {};
+  const clean  = {};
+  let reconnectRequired = false;
+
+  for (const [key, value] of Object.entries(updates)) {
+    const spec = CONFIG_SCHEMA[key];
+    if (!spec) { errors[key] = 'Campo desconhecido'; continue; }
+
+    let v = value;
+    if (spec.type === 'number') {
+      v = typeof v === 'string' ? parseFloat(v) : v;
+      if (typeof v !== 'number' || isNaN(v)) { errors[key] = 'Número inválido'; continue; }
+      if (spec.int) v = Math.round(v);
+      if (spec.min !== undefined && v < spec.min) { errors[key] = `Mínimo: ${spec.min}`; continue; }
+      if (spec.max !== undefined && v > spec.max) { errors[key] = `Máximo: ${spec.max}`; continue; }
+    } else if (spec.type === 'boolean') {
+      v = v === true || v === 'true';
+    } else {
+      v = String(v).trim();
+      if (spec.enum && !spec.enum.includes(v)) { errors[key] = `Valores: ${spec.enum.join(', ')}`; continue; }
+    }
+
+    if (CFG[key] !== v) {
+      clean[key] = v;
+      if (spec.reconnect) reconnectRequired = true;
+    }
+  }
+
+  if (Object.keys(errors).length > 0) return { ok: false, errors };
+
+  const capitalChanged = clean.CAPITAL_TOTAL !== undefined;
+  Object.assign(CFG, clean);
+  saveConfig();
+
+  if (capitalChanged) rebuildEquity();
+
+  if (reconnectRequired) {
+    log(`Config: símbolo/timeframe alterado → reconectando (${CFG.SYMBOL} ${CFG.TIMEFRAME})`, 'system');
+    candleCache   = [];
+    formingCandle = null;
+    isWarmingUp   = true;
+    try { ws?.close(); } catch {} // close dispara o fluxo de reconexão com novo OTP
+  }
+
+  if (Object.keys(clean).length > 0) {
+    log(`Config atualizada via painel: ${Object.keys(clean).join(', ')}`, 'system');
+  }
+
+  return { ok: true, applied: clean, reconnectRequired };
+}
+
+// Deriv granularity (seconds)
+const GRAN_MAP = { M1:60, M5:300, M15:900, M30:1800, H1:3600, H4:14400, D1:86400 };
+const granularity = () => GRAN_MAP[CFG.TIMEFRAME] || 900;
+
+const TRADES_FILE = join(ROOT, 'trades.json');
+
 // ─── State ────────────────────────────────────────────────────────────────────
 let logs          = [];
 let trades        = [];
-let equity        = CAPITAL_TOTAL;
+let equity        = CFG.CAPITAL_TOTAL;
 let dailyPnL      = 0;
 let dailyDate     = new Date().toDateString();
 let isWarmingUp   = true;
@@ -69,9 +174,9 @@ function log(msg, level = 'info') {
 }
 
 async function sendWebhook(content) {
-  if (!WEBHOOK_URL) return;
+  if (!CFG.WEBHOOK_URL) return;
   try {
-    await fetch(WEBHOOK_URL, {
+    await fetch(CFG.WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content })
@@ -93,7 +198,7 @@ function saveTrade(trade) {
 
 function rebuildEquity() {
   trades = loadTrades();
-  equity = CAPITAL_TOTAL;
+  equity = CFG.CAPITAL_TOTAL;
   for (const t of trades) {
     if (typeof t.pnl === 'number' && !isNaN(t.pnl)) equity += t.pnl;
   }
@@ -111,16 +216,16 @@ function calcSMA(closes, period) {
 
 // ─── Signal Engine ────────────────────────────────────────────────────────────
 function detectSignal(candles) {
-  if (candles.length < SMA_PERIOD + 5) return null;
+  if (candles.length < CFG.SMA_PERIOD + 5) return null;
   const closes  = candles.map(c => c.close);
-  const sma     = calcSMA(closes, SMA_PERIOD);
+  const sma     = calcSMA(closes, CFG.SMA_PERIOD);
   const n       = candles.length;
   const smaNow  = sma[n - 1], smaPrev = sma[n - 2], sma3 = sma[n - 4];
   if (!smaNow || !smaPrev || !sma3) return null;
   const trigger = candles[n - 1], pivot = candles[n - 2];
   const slope   = smaNow - sma3;
-  const up      = slope >  SLOPE_THRESHOLD;
-  const down    = slope < -SLOPE_THRESHOLD;
+  const up      = slope >  CFG.SLOPE_THRESHOLD;
+  const down    = slope < -CFG.SLOPE_THRESHOLD;
   if (up   && pivot.low  <= smaPrev && trigger.close > trigger.open && trigger.high > pivot.high) return 'buy';
   if (down && pivot.high >= smaPrev && trigger.close < trigger.open && trigger.low  < pivot.low)  return 'sell';
   return null;
@@ -132,7 +237,7 @@ function priceToUSD(stake, mult, entryPrice, priceDistance) {
 }
 
 function calcSLPrice(side, pivot) {
-  return side === 'buy' ? pivot.low - SL_POINTS : pivot.high + SL_POINTS;
+  return side === 'buy' ? pivot.low - CFG.SL_POINTS : pivot.high + CFG.SL_POINTS;
 }
 
 // ─── Daily Reset ─────────────────────────────────────────────────────────────
@@ -144,7 +249,7 @@ function checkDailyReset() {
   }
 }
 function isDailyLimitHit() {
-  return dailyPnL <= -(equity * DAILY_LOSS_PERC / 100);
+  return dailyPnL <= -(equity * CFG.DAILY_LOSS_PERC / 100);
 }
 
 // ─── WebSocket Manager ────────────────────────────────────────────────────────
@@ -234,7 +339,7 @@ function handleContractUpdate(poc) {
       price:     parseFloat(poc.exit_tick || 0),
       pnl:       pl
     });
-    sendWebhook(`**SAÍDA (SL)** ${SYMBOL} | PnL: $${pl.toFixed(2)} | Equity: $${equity.toFixed(2)}`);
+    sendWebhook(`**SAÍDA (SL)** ${CFG.SYMBOL} | PnL: $${pl.toFixed(2)} | Equity: $${equity.toFixed(2)}`);
     position = null;
   }
 }
@@ -249,6 +354,8 @@ async function processNewCandle() {
     await managePosition();
     return;
   }
+
+  if (!CFG.TRADING_ENABLED) return;
 
   if (isDailyLimitHit()) {
     log('Limite diário atingido. Sem novas entradas.', 'warning');
@@ -272,11 +379,11 @@ async function enterTrade(signal) {
   const slPrice   = calcSLPrice(signal, pivot);
   const slDist    = Math.abs(trigger.close - slPrice);
   const tp1Price  = signal === 'buy'
-    ? trigger.close + slDist * TP1_RATIO
-    : trigger.close - slDist * TP1_RATIO;
+    ? trigger.close + slDist * CFG.TP1_RATIO
+    : trigger.close - slDist * CFG.TP1_RATIO;
 
-  const slAmount  = priceToUSD(STAKE, MULTIPLIER, trigger.close, slDist);
-  const tp1Amount = priceToUSD(STAKE, MULTIPLIER, trigger.close, slDist * TP1_RATIO);
+  const slAmount  = priceToUSD(CFG.STAKE, CFG.MULTIPLIER, trigger.close, slDist);
+  const tp1Amount = priceToUSD(CFG.STAKE, CFG.MULTIPLIER, trigger.close, slDist * CFG.TP1_RATIO);
   const contractType = signal === 'buy' ? 'MULTUP' : 'MULTDOWN';
 
   log(`SINAL ${signal.toUpperCase()} | SL: ${slPrice.toFixed(2)} ($${slAmount}) | TP1: ${tp1Price.toFixed(2)} ($${tp1Amount})`, 'system');
@@ -287,19 +394,19 @@ async function enterTrade(signal) {
       proposal:          1,
       contract_type:     contractType,
       currency:          'USD',
-      underlying_symbol: SYMBOL,
-      amount:            STAKE,
+      underlying_symbol: CFG.SYMBOL,
+      amount:            CFG.STAKE,
       basis:             'stake',
-      multiplier:        MULTIPLIER,
+      multiplier:        CFG.MULTIPLIER,
       limit_order: {
         stop_loss:   slAmount,
-        take_profit: parseFloat((tp1Amount * (TP1_CLOSE_PERC / 100)).toFixed(2))
+        take_profit: parseFloat((tp1Amount * (CFG.TP1_CLOSE_PERC / 100)).toFixed(2))
       }
     });
     const proposalId = proposalRes.proposal?.id;
     if (!proposalId) throw new Error('Proposal sem ID: ' + JSON.stringify(proposalRes));
 
-    const result = await sendWS({ buy: proposalId, price: STAKE * 2 });
+    const result = await sendWS({ buy: proposalId, price: CFG.STAKE * 2 });
 
     const contract   = result.buy;
     const contractId = contract.contract_id;
@@ -310,8 +417,8 @@ async function enterTrade(signal) {
       contractId,
       side:         signal,
       contractType,
-      fullStake:    STAKE,
-      currentStake: STAKE,
+      fullStake:    CFG.STAKE,
+      currentStake: CFG.STAKE,
       entryPrice,
       sl:           slPrice,
       slAmount,
@@ -330,22 +437,22 @@ async function enterTrade(signal) {
       side:      signal,
       type:      'entry',
       price:     entryPrice,
-      stake:     STAKE,
+      stake:     CFG.STAKE,
       sl:        slPrice,
       tp1:       tp1Price,
       pnl:       null
     });
 
     await sendWebhook(
-      `**ENTRADA ${signal.toUpperCase()} ${SYMBOL}**\n` +
+      `**ENTRADA ${signal.toUpperCase()} ${CFG.SYMBOL}**\n` +
       `Preço: ${entryPrice} | SL: ${slPrice.toFixed(2)} | TP1: ${tp1Price.toFixed(2)}\n` +
-      `Stake: $${STAKE} | Mult: ${MULTIPLIER}x | SL: $${slAmount} | Equity: $${equity.toFixed(2)}`
+      `Stake: $${CFG.STAKE} | Mult: ${CFG.MULTIPLIER}x | SL: $${slAmount} | Equity: $${equity.toFixed(2)}`
     );
     log(`Contrato aberto: ${contractId} @ ${entryPrice}`, 'info');
 
   } catch (e) {
     log(`Erro ao abrir contrato: ${e.message}`, 'error');
-    await sendWebhook(`**ERRO** ${signal.toUpperCase()} ${SYMBOL}: ${e.message}`);
+    await sendWebhook(`**ERRO** ${signal.toUpperCase()} ${CFG.SYMBOL}: ${e.message}`);
   }
 }
 
@@ -356,7 +463,7 @@ async function managePosition() {
   const currentPrice = candleCache[n - 1].close;
   const prevCandle   = candleCache[n - 2];
 
-  // ── TP1: fechar contrato e reabrir com 20% ────────────────────────────────
+  // ── TP1: fechar contrato e reabrir com a fração restante ──────────────────
   if (!position.tp1Hit) {
     const tp1Reached = position.side === 'buy'
       ? currentPrice >= position.tp1Price
@@ -379,21 +486,27 @@ async function managePosition() {
           pnl:       pl
         });
 
-        log(`TP1 atingido! PnL: $${pl.toFixed(2)}. Reabrindo 20%...`, 'system');
+        log(`TP1 atingido! PnL: $${pl.toFixed(2)}. Reabrindo ${100 - CFG.TP1_CLOSE_PERC}%...`, 'system');
 
-        const trailStake = parseFloat((position.fullStake * (1 - TP1_CLOSE_PERC / 100)).toFixed(2));
+        const trailStake = parseFloat((position.fullStake * (1 - CFG.TP1_CLOSE_PERC / 100)).toFixed(2));
+        if (trailStake < 1) {
+          // Deriv exige stake mínimo de $1 — sem trailing se a fração for menor
+          log('Fração de trailing abaixo do stake mínimo ($1). Posição encerrada no TP1.', 'warning');
+          position = null;
+          return;
+        }
         const beSlDist   = 0.01;
-        const beSlAmount = priceToUSD(trailStake, MULTIPLIER, currentPrice, beSlDist);
+        const beSlAmount = priceToUSD(trailStake, CFG.MULTIPLIER, currentPrice, beSlDist);
 
         await sleep(1000);
         const prop2 = await sendWS({
           proposal:          1,
           contract_type:     position.contractType,
           currency:          'USD',
-          underlying_symbol: SYMBOL,
+          underlying_symbol: CFG.SYMBOL,
           amount:            trailStake,
           basis:             'stake',
-          multiplier:        MULTIPLIER,
+          multiplier:        CFG.MULTIPLIER,
           limit_order:       { stop_loss: parseFloat(Math.max(0.13, beSlAmount).toFixed(2)) }
         });
         const result2 = await sendWS({ buy: prop2.proposal.id, price: trailStake * 2 });
@@ -418,7 +531,7 @@ async function managePosition() {
 
         log(`Trailing aberto: ${c2.contract_id} | Stake: $${trailStake} | SL: breakeven`, 'info');
         await sendWebhook(
-          `**TP1 ${SYMBOL}** | PnL: +$${pl.toFixed(2)}\n` +
+          `**TP1 ${CFG.SYMBOL}** | PnL: +$${pl.toFixed(2)}\n` +
           `Trailing aberto ($${trailStake}) com SL em breakeven`
         );
 
@@ -433,15 +546,15 @@ async function managePosition() {
   if (position.tp1Hit) {
     let newSLPrice;
     if (position.side === 'buy') {
-      newSLPrice = prevCandle.low - TRAILING_BUFFER;
+      newSLPrice = prevCandle.low - CFG.TRAILING_BUFFER;
       if (newSLPrice <= position.sl) return;
     } else {
-      newSLPrice = prevCandle.high + TRAILING_BUFFER;
+      newSLPrice = prevCandle.high + CFG.TRAILING_BUFFER;
       if (newSLPrice >= position.sl) return;
     }
 
     const slDist      = Math.abs(position.entryPrice - newSLPrice);
-    const newSLAmount = priceToUSD(position.currentStake, MULTIPLIER, position.entryPrice, slDist);
+    const newSLAmount = priceToUSD(position.currentStake, CFG.MULTIPLIER, position.entryPrice, slDist);
 
     try {
       await sendWS({
@@ -482,11 +595,11 @@ async function getOTP() {
 
 async function loadHistory() {
   const res = await sendWS({
-    ticks_history: SYMBOL,
+    ticks_history: CFG.SYMBOL,
     adjust_start_time: 1,
     count:       500,
     end:         'latest',
-    granularity: GRANULARITY,
+    granularity: granularity(),
     style:       'candles'
   });
 
@@ -499,19 +612,19 @@ async function loadHistory() {
   }));
 
   isWarmingUp = false;
-  log(`Warm-up: ${candleCache.length} candles carregados para ${SYMBOL}`, 'system');
+  log(`Warm-up: ${candleCache.length} candles carregados para ${CFG.SYMBOL}`, 'system');
 }
 
 async function subscribeCandles() {
   await sendWS({
-    ticks_history: SYMBOL,
+    ticks_history: CFG.SYMBOL,
     count:         1,
     end:           'latest',
-    granularity:   GRANULARITY,
+    granularity:   granularity(),
     style:         'candles',
     subscribe:     1
   });
-  log(`Subscrito a candles ${SYMBOL} (${TIMEFRAME})`, 'system');
+  log(`Subscrito a candles ${CFG.SYMBOL} (${CFG.TIMEFRAME})`, 'system');
 }
 
 async function subscribeBalance() {
@@ -567,29 +680,54 @@ async function connectWS() {
 function startHttpServer() {
   const server = createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     res.setHeader('Content-Type', 'application/json');
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
     const url = req.url.split('?')[0];
+
     if (url === '/status') {
       const last = candleCache[candleCache.length - 1];
       res.writeHead(200);
       res.end(JSON.stringify({
         broker:       'Deriv',
         accountId:    DERIV_ACCOUNT_ID,
-        symbol:       SYMBOL,
-        timeframe:    TIMEFRAME,
+        symbol:       CFG.SYMBOL,
+        timeframe:    CFG.TIMEFRAME,
         currentPrice: last?.close ?? null,
         equity:       parseFloat(equity.toFixed(2)),
         dailyPnL:     parseFloat(dailyPnL.toFixed(2)),
         position,
         isWarmingUp,
         wsReady,
-        config: { SMA_PERIOD, SLOPE_THRESHOLD, SL_POINTS, TRAILING_BUFFER, TP1_RATIO, TP1_CLOSE_PERC, MULTIPLIER, STAKE, RISK_PERC, DAILY_LOSS_PERC }
+        tradingEnabled: CFG.TRADING_ENABLED,
+        config: CFG
       }));
       return;
     }
+
+    if (url === '/config') {
+      if (req.method === 'GET') {
+        res.writeHead(200);
+        res.end(JSON.stringify({ config: CFG, schema: CONFIG_SCHEMA }));
+        return;
+      }
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', c => { body += c; if (body.length > 64 * 1024) req.destroy(); });
+        req.on('end', () => {
+          let updates;
+          try { updates = JSON.parse(body); }
+          catch { res.writeHead(400); res.end(JSON.stringify({ ok: false, error: 'JSON inválido' })); return; }
+          const result = applyConfigUpdate(updates);
+          res.writeHead(result.ok ? 200 : 400);
+          res.end(JSON.stringify({ ...result, config: CFG }));
+        });
+        return;
+      }
+    }
+
     if (url === '/trades')  { res.writeHead(200); res.end(JSON.stringify(trades));      return; }
     if (url === '/logs')    { res.writeHead(200); res.end(JSON.stringify(logs));        return; }
     if (url === '/candles') { res.writeHead(200); res.end(JSON.stringify(candleCache)); return; }
@@ -634,8 +772,8 @@ function startHttpServer() {
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 async function main() {
-  log(`=== XAU/USD Deriv Robot v4.0 ===`, 'system');
-  log(`${SYMBOL} ${TIMEFRAME} | Mult: ${MULTIPLIER}x | Stake: $${STAKE} | Conta: ${DERIV_ACCOUNT_ID}`, 'system');
+  log(`=== XAU/USD Deriv Robot v5.0 — Config Dinâmica ===`, 'system');
+  log(`${CFG.SYMBOL} ${CFG.TIMEFRAME} | Mult: ${CFG.MULTIPLIER}x | Stake: $${CFG.STAKE} | Trading: ${CFG.TRADING_ENABLED ? 'ON' : 'OFF'} | Conta: ${DERIV_ACCOUNT_ID}`, 'system');
   rebuildEquity();
   await connectWS();
 }

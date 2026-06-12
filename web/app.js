@@ -218,6 +218,25 @@ function updateStats(status) {
   document.getElementById('env-badge').className  = `badge ${isDemo ? 'practice' : 'live'}`;
   document.getElementById('env-badge').textContent = isDemo ? 'DEMO' : 'LIVE';
   document.getElementById('tf-badge').textContent  = status.timeframe ?? '—';
+
+  // Badge de trading on/off (master switch)
+  const tBadge = document.getElementById('trading-badge');
+  if (tBadge && status.tradingEnabled !== undefined) {
+    tBadge.className   = `badge ${status.tradingEnabled ? 'trading-on' : 'trading-off'}`;
+    tBadge.textContent = status.tradingEnabled ? 'TRADING ON' : 'TRADING OFF';
+  }
+
+  // Título com símbolo atual
+  const title = document.getElementById('header-title');
+  if (title && status.symbol) {
+    const names = {
+      frxXAUUSD: 'XAU/USD', frxXAGUSD: 'XAG/USD', frxEURUSD: 'EUR/USD',
+      frxGBPUSD: 'GBP/USD', frxUSDJPY: 'USD/JPY', frxAUDUSD: 'AUD/USD',
+      cryBTCUSD: 'BTC/USD', cryETHUSD: 'ETH/USD',
+      R_50: 'Volatility 50', R_75: 'Volatility 75', R_100: 'Volatility 100',
+    };
+    title.textContent = `${names[status.symbol] ?? status.symbol} — Operação Média Pro 20`;
+  }
 }
 
 function updateConfig(cfg) {
@@ -367,6 +386,91 @@ async function init() {
     ts.fitContent();
   });
 })();
+
+// ─── Config Modal (estilo ProfitTrailer) ─────────────────────────────────────
+const CFG_FIELDS = [
+  'TRADING_ENABLED', 'SYMBOL', 'TIMEFRAME',
+  'SMA_PERIOD', 'SLOPE_THRESHOLD',
+  'TP1_RATIO', 'TP1_CLOSE_PERC', 'SL_POINTS', 'TRAILING_BUFFER',
+  'STAKE', 'MULTIPLIER', 'CAPITAL_TOTAL', 'RISK_PERC', 'DAILY_LOSS_PERC',
+  'WEBHOOK_URL',
+];
+
+const modal     = document.getElementById('config-modal');
+const feedback  = document.getElementById('config-feedback');
+
+function cfgInput(key) { return document.getElementById(`cfg-in-${key}`); }
+
+function showFeedback(msg, ok) {
+  feedback.textContent = msg;
+  feedback.className = `cfg-feedback ${ok ? 'success' : 'error'}`;
+}
+
+async function openConfigModal() {
+  feedback.className = 'cfg-feedback hidden';
+  try {
+    const { config } = await apiFetch('/config');
+    for (const key of CFG_FIELDS) {
+      const el = cfgInput(key);
+      if (!el) continue;
+      if (el.type === 'checkbox') el.checked = !!config[key];
+      else el.value = config[key] ?? '';
+    }
+    modal.classList.remove('hidden');
+  } catch (e) {
+    alert('Não foi possível carregar a configuração do robô: ' + e.message);
+  }
+}
+
+function closeConfigModal() { modal.classList.add('hidden'); }
+
+async function saveConfig() {
+  const btn = document.getElementById('config-save');
+  btn.disabled = true;
+  try {
+    const updates = {};
+    for (const key of CFG_FIELDS) {
+      const el = cfgInput(key);
+      if (!el) continue;
+      if (el.type === 'checkbox')    updates[key] = el.checked;
+      else if (el.type === 'number') updates[key] = parseFloat(el.value);
+      else                           updates[key] = el.value;
+    }
+
+    const res = await fetch(`${apiUrl}/config`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(updates),
+    });
+    const data = await res.json();
+
+    if (data.ok) {
+      const n = Object.keys(data.applied ?? {}).length;
+      showFeedback(
+        n === 0
+          ? 'Nenhuma alteração detectada.'
+          : `✓ ${n} parâmetro(s) aplicado(s)${data.reconnectRequired ? ' — robô reconectando com novo instrumento...' : ' ao vivo.'}`,
+        true
+      );
+      // Recarrega gráfico e status (símbolo/timeframe podem ter mudado)
+      smaPeriod = data.config?.SMA_PERIOD ?? smaPeriod;
+      setTimeout(() => { candlesLoaded = false; init(); }, data.reconnectRequired ? 4000 : 500);
+    } else {
+      const errs = Object.entries(data.errors ?? {}).map(([k, v]) => `${k}: ${v}`).join(' | ');
+      showFeedback('✗ ' + (errs || data.error || 'Erro ao salvar'), false);
+    }
+  } catch (e) {
+    showFeedback('✗ Falha de conexão: ' + e.message, false);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById('config-open').addEventListener('click', openConfigModal);
+document.getElementById('config-close').addEventListener('click', closeConfigModal);
+document.getElementById('config-cancel').addEventListener('click', closeConfigModal);
+document.getElementById('config-save').addEventListener('click', saveConfig);
+modal.addEventListener('click', (e) => { if (e.target === modal) closeConfigModal(); });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
 init();

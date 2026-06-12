@@ -12,11 +12,13 @@
 <body>
 
 <header>
-  <h1>XAU/USD — Operação Média Pro 20</h1>
+  <h1 id="header-title">XAU/USD — Operação Média Pro 20</h1>
   <div class="header-meta">
+    <span id="trading-badge" class="badge live">TRADING OFF</span>
     <span id="env-badge" class="badge practice">PRACTICE</span>
     <span id="tf-badge" style="color:#8b949e;font-size:12px">M15</span>
     <span id="status-dot"></span>
+    <button id="config-open" class="config-btn" title="Configurações">⚙ Config</button>
   </div>
 </header>
 
@@ -103,6 +105,172 @@
 
   </div>
 
+</div>
+
+<!-- ─── Modal de Configuração (estilo ProfitTrailer) ─── -->
+<div id="config-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>⚙ Configuração do Robô</h2>
+      <button id="config-close" class="modal-close">✕</button>
+    </div>
+
+    <div class="modal-body">
+
+      <!-- Master switch -->
+      <div class="cfg-section cfg-master">
+        <div class="cfg-field cfg-toggle-field">
+          <label class="switch">
+            <input type="checkbox" id="cfg-in-TRADING_ENABLED">
+            <span class="slider"></span>
+          </label>
+          <div>
+            <span class="cfg-label">Trading Ativo</span>
+            <span class="cfg-hint">Quando desligado, o robô monitora mas não abre novas posições</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Instrumento -->
+      <div class="cfg-section">
+        <h3>🎯 Instrumento</h3>
+        <div class="cfg-grid">
+          <div class="cfg-field">
+            <span class="cfg-label">Símbolo</span>
+            <select id="cfg-in-SYMBOL">
+              <option value="frxXAUUSD">Ouro (XAU/USD)</option>
+              <option value="frxXAGUSD">Prata (XAG/USD)</option>
+              <option value="frxEURUSD">EUR/USD</option>
+              <option value="frxGBPUSD">GBP/USD</option>
+              <option value="frxUSDJPY">USD/JPY</option>
+              <option value="frxAUDUSD">AUD/USD</option>
+              <option value="cryBTCUSD">Bitcoin (BTC/USD)</option>
+              <option value="cryETHUSD">Ethereum (ETH/USD)</option>
+              <option value="R_50">Volatility 50</option>
+              <option value="R_75">Volatility 75</option>
+              <option value="R_100">Volatility 100</option>
+            </select>
+            <span class="cfg-hint">Trocar reconecta o robô automaticamente</span>
+          </div>
+          <div class="cfg-field">
+            <span class="cfg-label">Timeframe</span>
+            <select id="cfg-in-TIMEFRAME">
+              <option value="M1">M1</option>
+              <option value="M5">M5</option>
+              <option value="M15">M15</option>
+              <option value="M30">M30</option>
+              <option value="H1">H1</option>
+              <option value="H4">H4</option>
+              <option value="D1">D1</option>
+            </select>
+            <span class="cfg-hint">Período de cada candle</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Estratégia de Entrada -->
+      <div class="cfg-section">
+        <h3>📈 Entrada (Buy Settings)</h3>
+        <div class="cfg-grid">
+          <div class="cfg-field">
+            <span class="cfg-label">SMA Período</span>
+            <input type="number" id="cfg-in-SMA_PERIOD" min="2" max="200" step="1">
+            <span class="cfg-hint">Média móvel da tendência (padrão: 20)</span>
+          </div>
+          <div class="cfg-field">
+            <span class="cfg-label">Slope Threshold</span>
+            <input type="number" id="cfg-in-SLOPE_THRESHOLD" min="0" max="1000" step="0.1">
+            <span class="cfg-hint">Inclinação mínima da SMA para validar tendência</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Saída e Trailing -->
+      <div class="cfg-section">
+        <h3>💰 Saída (Sell Settings & Trailing)</h3>
+        <div class="cfg-grid">
+          <div class="cfg-field">
+            <span class="cfg-label">TP1 Ratio (R/R)</span>
+            <input type="number" id="cfg-in-TP1_RATIO" min="0.5" max="20" step="0.1">
+            <span class="cfg-hint">Take profit em múltiplos do risco (2 = 2:1)</span>
+          </div>
+          <div class="cfg-field">
+            <span class="cfg-label">TP1 Close %</span>
+            <input type="number" id="cfg-in-TP1_CLOSE_PERC" min="0" max="100" step="1">
+            <span class="cfg-hint">% da posição fechada no TP1 (resto vai a trailing)</span>
+          </div>
+          <div class="cfg-field">
+            <span class="cfg-label">SL Points</span>
+            <input type="number" id="cfg-in-SL_POINTS" min="0.1" max="1000" step="0.1">
+            <span class="cfg-hint">Distância extra do stop abaixo/acima do pivô</span>
+          </div>
+          <div class="cfg-field">
+            <span class="cfg-label">Trailing Buffer</span>
+            <input type="number" id="cfg-in-TRAILING_BUFFER" min="0" max="1000" step="0.1">
+            <span class="cfg-hint">Folga do trailing stop vs. candle anterior</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Risco -->
+      <div class="cfg-section">
+        <h3>⚖️ Risco & Capital</h3>
+        <div class="cfg-grid">
+          <div class="cfg-field">
+            <span class="cfg-label">Stake ($)</span>
+            <input type="number" id="cfg-in-STAKE" min="1" max="2000" step="1">
+            <span class="cfg-hint">Valor por trade em USD (mín. $1)</span>
+          </div>
+          <div class="cfg-field">
+            <span class="cfg-label">Multiplicador</span>
+            <select id="cfg-in-MULTIPLIER">
+              <option value="10">10x</option>
+              <option value="20">20x</option>
+              <option value="50">50x</option>
+              <option value="100">100x</option>
+              <option value="200">200x</option>
+              <option value="500">500x</option>
+            </select>
+            <span class="cfg-hint">Alavancagem Deriv Multipliers</span>
+          </div>
+          <div class="cfg-field">
+            <span class="cfg-label">Capital Total ($)</span>
+            <input type="number" id="cfg-in-CAPITAL_TOTAL" min="1" step="100">
+            <span class="cfg-hint">Base de cálculo do equity</span>
+          </div>
+          <div class="cfg-field">
+            <span class="cfg-label">Risco por Trade (%)</span>
+            <input type="number" id="cfg-in-RISK_PERC" min="0.1" max="100" step="0.1">
+            <span class="cfg-hint">Referência de risco por operação</span>
+          </div>
+          <div class="cfg-field">
+            <span class="cfg-label">Perda Diária Máx. (%)</span>
+            <input type="number" id="cfg-in-DAILY_LOSS_PERC" min="0.1" max="100" step="0.5">
+            <span class="cfg-hint">Hard stop: bloqueia entradas ao atingir</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Alertas -->
+      <div class="cfg-section">
+        <h3>🔔 Alertas</h3>
+        <div class="cfg-grid">
+          <div class="cfg-field" style="grid-column: 1 / -1">
+            <span class="cfg-label">Webhook URL (Discord/Telegram)</span>
+            <input type="text" id="cfg-in-WEBHOOK_URL" placeholder="https://discord.com/api/webhooks/...">
+            <span class="cfg-hint">Vazio = sem alertas</span>
+          </div>
+        </div>
+      </div>
+
+      <div id="config-feedback" class="cfg-feedback hidden"></div>
+    </div>
+
+    <div class="modal-footer">
+      <button id="config-cancel" class="btn-secondary">Cancelar</button>
+      <button id="config-save" class="btn-primary">💾 Salvar & Aplicar</button>
+    </div>
+  </div>
 </div>
 
 <script src="app.js"></script>
