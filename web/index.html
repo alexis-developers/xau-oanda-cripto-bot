@@ -46,8 +46,8 @@
       <span class="stat-value" id="stat-daily-pnl">—</span>
     </div>
     <div class="stat">
-      <span class="stat-label">SMA Período</span>
-      <span class="stat-value" id="stat-sma">20</span>
+      <span class="stat-label">Estratégia</span>
+      <span class="stat-value" id="stat-strategy" style="font-size:13px">SMA</span>
     </div>
     <div class="stat">
       <span class="stat-label">Risco/Trade</span>
@@ -65,8 +65,30 @@
       <button class="chart-btn" id="zoom-in"  title="Zoom In">+</button>
       <button class="chart-btn" id="zoom-out" title="Zoom Out">−</button>
       <button class="chart-btn" id="zoom-fit" title="Ajustar tudo">⊡</button>
+      <div style="flex-grow: 1;"></div>
+      <button class="chart-btn toggle-panel-btn active" data-panel="panel-rsi" style="width: auto; padding: 0 8px; font-size: 11px; gap: 4px; display: flex; align-items: center;" title="Habilitar/Desabilitar painel do RSI">📊 RSI</button>
+      <button class="chart-btn toggle-panel-btn active" data-panel="panel-macd" style="width: auto; padding: 0 8px; font-size: 11px; gap: 4px; display: flex; align-items: center;" title="Habilitar/Desabilitar painel do MACD">📊 MACD</button>
     </div>
     <div id="chart-main"></div>
+ 
+    <!-- RSI Sub-panel -->
+    <div class="sub-panel" id="panel-rsi">
+      <div class="sub-panel-header">
+        <span>RSI</span>
+        <button class="panel-toggle chart-btn" data-chart="chart-rsi" title="Colapsar">▲</button>
+      </div>
+      <div id="chart-rsi"></div>
+    </div>
+ 
+    <!-- MACD Sub-panel -->
+    <div class="sub-panel" id="panel-macd">
+      <div class="sub-panel-header">
+        <span>MACD</span>
+        <button class="panel-toggle chart-btn" data-chart="chart-macd" title="Colapsar">▲</button>
+      </div>
+      <div id="chart-macd"></div>
+    </div>
+ 
   </div>
 
   <!-- Sidebar -->
@@ -90,7 +112,14 @@
         <tr><td>TP1 Close %</td><td id="cfg-tp1c">—</td></tr>
         <tr><td>Risco %</td><td id="cfg-risk">—</td></tr>
         <tr><td>Perda Diária %</td><td id="cfg-daily">—</td></tr>
-      </table>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Backtest (TradingView)</h3>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <span style="font-size:11px; color:var(--text-muted); line-height:1.4">Gere o código Pine Script correspondente à estratégia configurada acima para rodar no TradingView.</span>
+        <button id="btn-backtest-open" class="btn-primary" style="background:var(--blue); color:#fff; width:100%; border-radius:4px; padding:6px; font-size:12px; cursor:pointer;">📊 Gerar Script Pine</button>
+      </div>
     </div>
 
     <div class="sidebar-section" style="flex:1;overflow:hidden;display:flex;flex-direction:column">
@@ -115,7 +144,14 @@
       <button id="config-close" class="modal-close">✕</button>
     </div>
 
+    <div class="modal-tabs">
+      <button class="tab-btn active" data-tab="tab-params">⚙️ Parâmetros</button>
+      <button class="tab-btn" data-tab="tab-keys">🔌 Corretoras / Conexões</button>
+    </div>
+
     <div class="modal-body">
+      <!-- ABA DE PARÂMETROS OPERACIONAIS -->
+      <div id="tab-params" class="tab-content">
 
       <!-- Master switch -->
       <div class="cfg-section cfg-master">
@@ -186,19 +222,137 @@
         </div>
       </div>
 
-      <!-- Estratégia de Entrada -->
+      <!-- Estratégia & Indicadores -->
       <div class="cfg-section">
-        <h3>📈 Entrada (Buy Settings)</h3>
-        <div class="cfg-grid">
+        <h3>🔧 Estratégia & Indicadores</h3>
+
+        <!-- Seleção de estratégias -->
+        <div class="cfg-grid" style="margin-bottom:14px">
           <div class="cfg-field">
-            <span class="cfg-label">SMA Período</span>
-            <input type="number" id="cfg-in-SMA_PERIOD" min="2" max="200" step="1">
-            <span class="cfg-hint">Média móvel da tendência (padrão: 20)</span>
+            <span class="cfg-label">Indicador 1 (primário)</span>
+            <select id="cfg-in-BUY_STRATEGY_1">
+              <option value="SMA">SMA — Média Móvel Simples</option>
+              <option value="RSI">RSI — Força Relativa</option>
+              <option value="BOLLINGER">Bollinger Bands</option>
+              <option value="MACD">MACD — Cruzamento</option>
+              <option value="EMA_CROSS">EMA Cross — Cruzamento de Médias</option>
+            </select>
+            <span class="cfg-hint">Indicador principal de entrada</span>
           </div>
           <div class="cfg-field">
-            <span class="cfg-label">Slope Threshold</span>
-            <input type="number" id="cfg-in-SLOPE_THRESHOLD" min="0" max="1000" step="0.1">
-            <span class="cfg-hint">Inclinação mínima da SMA para validar tendência</span>
+            <span class="cfg-label">Indicador 2 (confirmador)</span>
+            <select id="cfg-in-BUY_STRATEGY_2">
+              <option value="NONE">Nenhum (só o indicador 1)</option>
+              <option value="SMA">SMA</option>
+              <option value="RSI">RSI</option>
+              <option value="BOLLINGER">Bollinger Bands</option>
+              <option value="MACD">MACD</option>
+              <option value="EMA_CROSS">EMA Cross</option>
+            </select>
+            <span class="cfg-hint">Segundo filtro de confirmação (opcional)</span>
+          </div>
+          <div class="cfg-field">
+            <span class="cfg-label">Lógica de Combinação</span>
+            <select id="cfg-in-BUY_LOGIC">
+              <option value="AND">AND — ambos confirmam (mais preciso)</option>
+              <option value="OR">OR — qualquer um sinaliza (mais agressivo)</option>
+            </select>
+            <span class="cfg-hint">Como combinar os dois indicadores</span>
+          </div>
+        </div>
+
+        <!-- SMA params -->
+        <div class="cfg-subsection">
+          <span class="cfg-subsection-title">SMA / Slope</span>
+          <div class="cfg-grid">
+            <div class="cfg-field">
+              <span class="cfg-label">SMA Período</span>
+              <input type="number" id="cfg-in-SMA_PERIOD" min="2" max="200" step="1">
+              <span class="cfg-hint">Média móvel principal (padrão: 20)</span>
+            </div>
+            <div class="cfg-field">
+              <span class="cfg-label">Slope Threshold</span>
+              <input type="number" id="cfg-in-SLOPE_THRESHOLD" min="0" max="1000" step="0.1">
+              <span class="cfg-hint">Inclinação mínima para validar tendência</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- RSI params -->
+        <div class="cfg-subsection">
+          <span class="cfg-subsection-title">RSI</span>
+          <div class="cfg-grid">
+            <div class="cfg-field">
+              <span class="cfg-label">RSI Período</span>
+              <input type="number" id="cfg-in-RSI_PERIOD" min="2" max="100" step="1">
+              <span class="cfg-hint">Janela do RSI (padrão: 14)</span>
+            </div>
+            <div class="cfg-field">
+              <span class="cfg-label">Oversold (compra)</span>
+              <input type="number" id="cfg-in-RSI_OVERSOLD" min="1" max="49" step="1">
+              <span class="cfg-hint">Sinal de compra quando RSI cruza acima</span>
+            </div>
+            <div class="cfg-field">
+              <span class="cfg-label">Overbought (venda)</span>
+              <input type="number" id="cfg-in-RSI_OVERBOUGHT" min="51" max="99" step="1">
+              <span class="cfg-hint">Sinal de venda quando RSI cruza abaixo</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bollinger params -->
+        <div class="cfg-subsection">
+          <span class="cfg-subsection-title">Bollinger Bands</span>
+          <div class="cfg-grid">
+            <div class="cfg-field">
+              <span class="cfg-label">BB Período</span>
+              <input type="number" id="cfg-in-BB_PERIOD" min="5" max="200" step="1">
+              <span class="cfg-hint">Janela das bandas (padrão: 20)</span>
+            </div>
+            <div class="cfg-field">
+              <span class="cfg-label">BB Desvio Padrão</span>
+              <input type="number" id="cfg-in-BB_STD" min="0.5" max="5" step="0.1">
+              <span class="cfg-hint">Largura das bandas (padrão: 2.0)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- MACD params -->
+        <div class="cfg-subsection">
+          <span class="cfg-subsection-title">MACD</span>
+          <div class="cfg-grid">
+            <div class="cfg-field">
+              <span class="cfg-label">MACD Rápido</span>
+              <input type="number" id="cfg-in-MACD_FAST" min="2" max="50" step="1">
+              <span class="cfg-hint">EMA rápida (padrão: 12)</span>
+            </div>
+            <div class="cfg-field">
+              <span class="cfg-label">MACD Lento</span>
+              <input type="number" id="cfg-in-MACD_SLOW" min="5" max="200" step="1">
+              <span class="cfg-hint">EMA lenta (padrão: 26)</span>
+            </div>
+            <div class="cfg-field">
+              <span class="cfg-label">MACD Sinal</span>
+              <input type="number" id="cfg-in-MACD_SIGNAL" min="2" max="50" step="1">
+              <span class="cfg-hint">Linha de sinal (padrão: 9)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- EMA Cross params -->
+        <div class="cfg-subsection">
+          <span class="cfg-subsection-title">EMA Cross</span>
+          <div class="cfg-grid">
+            <div class="cfg-field">
+              <span class="cfg-label">EMA Rápida</span>
+              <input type="number" id="cfg-in-EMA_FAST" min="2" max="100" step="1">
+              <span class="cfg-hint">EMA curta (padrão: 9)</span>
+            </div>
+            <div class="cfg-field">
+              <span class="cfg-label">EMA Lenta</span>
+              <input type="number" id="cfg-in-EMA_SLOW" min="5" max="500" step="1">
+              <span class="cfg-hint">EMA longa (padrão: 21)</span>
+            </div>
           </div>
         </div>
       </div>
@@ -281,12 +435,128 @@
         </div>
       </div>
 
+      </div> <!-- fim do tab-params -->
+
+      <!-- ABA DE CREDENCIAIS DE CORRETORAS -->
+      <div id="tab-keys" class="tab-content hidden">
+        <div class="cfg-section">
+          <h3>📈 Deriv (Forex, Índices e CFDs)</h3>
+          <div class="cfg-grid">
+            <div class="cfg-field">
+              <span class="cfg-label">App ID</span>
+              <input type="text" id="key-in-deriv-appid" placeholder="Ex: 33v8gypvQ2TA7ORg5HNfb">
+            </div>
+            <div class="cfg-field">
+              <span class="cfg-label">Account ID (ID da Conta)</span>
+              <input type="text" id="key-in-deriv-account" placeholder="Ex: CR123456">
+            </div>
+          </div>
+        </div>
+
+        <div class="cfg-section">
+          <h3>🟡 Binance Spot / Futuros (Criptomoedas)</h3>
+          <div class="cfg-grid">
+            <div class="cfg-field">
+              <span class="cfg-label">API Key</span>
+              <input type="text" id="key-in-binance-key" placeholder="Insira a API Key da Binance">
+            </div>
+            <div class="cfg-field">
+              <span class="cfg-label">Secret Key</span>
+              <div class="password-input-wrapper">
+                <input type="password" id="key-in-binance-secret" placeholder="Insira a Secret Key da Binance">
+                <button type="button" class="btn-toggle-password" onclick="togglePasswordVisibility('key-in-binance-secret')">👁️</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div> <!-- fim do tab-keys -->
+
       <div id="config-feedback" class="cfg-feedback hidden"></div>
     </div>
 
     <div class="modal-footer">
       <button id="config-cancel" class="btn-secondary">Cancelar</button>
       <button id="config-save" class="btn-primary">💾 Salvar & Aplicar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Modal de Backtest (Pine Script) ─── -->
+<div id="backtest-modal" class="modal-overlay hidden">
+  <div class="modal" style="width: min(800px, 94vw);">
+    <div class="modal-header">
+      <h2>📊 Gerador de Backtest Pine Script (TradingView)</h2>
+      <button id="backtest-close" class="modal-close">✕</button>
+    </div>
+
+    <div class="modal-body" style="gap: 14px;">
+      <p style="font-size: 12px; color: var(--text-muted); line-height: 1.4;">
+        O código abaixo representa exatamente as regras de entrada e saída configuradas no robô (estratégia atual). Cole-o no editor de Pine Script do TradingView para rodar a simulação histórica.
+      </p>
+
+      <div class="cfg-section" style="padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+          <span class="cfg-label" style="color: var(--yellow);">📄 Código Pine Script v5</span>
+          <div style="display: flex; gap: 8px;">
+            <button id="backtest-copy" class="btn-secondary" style="padding: 4px 10px; font-size: 11px;">📋 Copiar Código</button>
+            <button id="backtest-download" class="btn-primary" style="padding: 4px 10px; font-size: 11px;">💾 Baixar Arquivo .pine</button>
+          </div>
+        </div>
+        <textarea id="backtest-code" readonly style="width: 100%; height: 200px; background: #0a0d11; color: var(--green); border: 1px solid var(--border); border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 10px; resize: none;"></textarea>
+      </div>
+
+      <div class="cfg-section">
+        <h3 style="color: var(--yellow); margin-bottom: 8px;">📋 Passo a Passo de Execução</h3>
+        <ol style="font-size: 12px; color: var(--text); padding-left: 18px; display: flex; flex-direction: column; gap: 6px; line-height: 1.4;">
+          <li>Acesse <a href="https://tradingview.com" target="_blank" style="color: var(--blue); text-decoration: none;">tradingview.com</a> e abra o gráfico do par operado (ex: <strong>Gold / XAUUSD</strong>).</li>
+          <li>Configure o mesmo tempo gráfico do robô (ex: <strong>15 minutos</strong>).</li>
+          <li>No rodapé da página, clique na aba <strong>"Editor do Pine"</strong> (Pine Editor).</li>
+          <li>Apague todo o código existente lá e cole o código gerado acima.</li>
+          <li>Clique no botão azul <strong>"Adicionar ao gráfico"</strong> (Add to chart).</li>
+          <li>Vá para a aba ao lado <strong>"Testador de Estratégia"</strong> (Strategy Tester) para ver o resultado do backteste!</li>
+          <li>Você pode clicar na engrenagem ⚙️ no gráfico para reconfigurar os parâmetros no TradingView de forma interativa.</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button id="backtest-ok" class="btn-secondary">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Widget de Chat da IA (AlexisProfit AI) ─── -->
+<div id="chat-widget" class="chat-collapsed">
+  <button id="chat-toggle" class="chat-bubble-btn" title="Conversar com AlexisProfit AI">💬</button>
+  
+  <div id="chat-panel" class="chat-panel hidden">
+    <div class="chat-header">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="chat-avatar">🤖</span>
+        <div>
+          <h4 style="margin:0; font-size:12px; color:var(--yellow);">AlexisProfit AI</h4>
+          <span style="font-size:9px; color:var(--green); font-weight:600;">ONLINE (Llama 3.1)</span>
+        </div>
+      </div>
+      <button id="chat-close-btn" class="modal-close" style="padding:0 5px;">✕</button>
+    </div>
+    
+    <div id="chat-messages" class="chat-messages">
+      <div class="chat-msg system">
+        Olá! Sou o <strong>AlexisProfit AI</strong>. Posso te ajudar a analisar os parâmetros do robô, sugerir otimizações de RSI/SMA ou explicar regras de trading. Como posso ajudar hoje?
+      </div>
+    </div>
+    
+    <!-- Atalhos Rápidos -->
+    <div class="chat-shortcuts">
+      <button class="chat-shortcut-btn" data-msg="Como estão os resultados do robô hoje?">📊 Resultados</button>
+      <button class="chat-shortcut-btn" data-msg="Sugerir otimização para RSI e SMA">⚙️ Otimizar</button>
+      <button class="chat-shortcut-btn" data-msg="O mercado está aberto ou fechado agora?">🕒 Horário</button>
+    </div>
+    
+    <div class="chat-input-area">
+      <input type="text" id="chat-input-text" placeholder="Pergunte ao AlexisProfit AI...">
+      <button id="chat-send-btn">Enviar</button>
     </div>
   </div>
 </div>

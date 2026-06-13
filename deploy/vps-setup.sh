@@ -9,7 +9,7 @@ set -e
 
 REPO_URL="SEU_REPOSITORIO_GITHUB"   # ex: https://github.com/usuario/xau-oanda-bot.git
 APP_DIR="/root/xau-oanda-bot"
-DOMAIN="xau-bot.desenvolvimentodesites.dev.br"
+DOMAIN="alexisprofit-bot.desenvolvimentodesites.dev.br"
 
 echo "=== [1/6] Node.js 20 LTS ==="
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
@@ -53,15 +53,15 @@ echo "     (preencher OANDA_TOKEN e OANDA_ACCOUNT_ID)"
 echo ""
 echo "  2. Configurar Cloudflare Tunnel:"
 echo "     cloudflared tunnel login"
-echo "     cloudflared tunnel create xau-oanda-bot"
+echo "     cloudflared tunnel create alexisprofit-bot"
 echo "     # Copiar o Tunnel ID e colar em deploy/tunnel-config.yml"
 echo "     cp deploy/tunnel-config.yml ~/.cloudflared/config.yml"
 echo "     nano ~/.cloudflared/config.yml   # substituir SEU-TUNNEL-ID"
-echo "     cloudflared tunnel route dns xau-oanda-bot $DOMAIN"
+echo "     cloudflared tunnel route dns alexisprofit-bot $DOMAIN"
 echo ""
 echo "  3. Iniciar com PM2:"
 echo "     pm2 start ecosystem.config.cjs"
-echo "     pm2 start \"cloudflared tunnel run xau-oanda-bot\" --name tunnel-xau"
+echo "     pm2 start \"cloudflared tunnel run alexisprofit-bot\" --name tunnel-alexis"
 echo "     pm2 save && pm2 startup"
 echo ""
 echo "  4. Verificar:"

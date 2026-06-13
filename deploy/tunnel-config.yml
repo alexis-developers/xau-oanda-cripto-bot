@@ -4,10 +4,10 @@
 # O tunnel expõe o robô (porta 8000) de forma segura em HTTPS,
 # resolvendo o Mixed Content Error entre Cloudflare Pages (HTTPS) e o robô (HTTP).
 
-tunnel: SEU-TUNNEL-ID
-credentials-file: /root/.cloudflared/SEU-TUNNEL-ID.json
+tunnel: 5fdb902d-3600-43bb-81bf-0347274769ad
+credentials-file: /root/.cloudflared/5fdb902d-3600-43bb-81bf-0347274769ad.json
 
 ingress:
-  - hostname: xau-bot.desenvolvimentodesites.dev.br
-    service: http://localhost:8000
+  - hostname: alexisprofit-bot.desenvolvimentodesites.dev.br
+    service: http://localhost:8001
   - service: http_status:404
