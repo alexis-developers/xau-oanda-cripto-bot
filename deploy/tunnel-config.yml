@@ -1,5 +1,5 @@
 # Cloudflare Tunnel — XAU OANDA Bot
-# Preencher SEU-TUNNEL-ID após: cloudflared tunnel create xau-oanda-bot
+# Preencher SEU-TUNNEL-ID após: cloudflared tunnel create multi-trader-pro
 #
 # O tunnel expõe o robô (porta 8000) de forma segura em HTTPS,
 # resolvendo o Mixed Content Error entre Cloudflare Pages (HTTPS) e o robô (HTTP).

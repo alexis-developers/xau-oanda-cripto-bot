@@ -7,8 +7,8 @@
 
 set -e
 
-REPO_URL="SEU_REPOSITORIO_GITHUB"   # ex: https://github.com/usuario/xau-oanda-bot.git
-APP_DIR="/root/xau-oanda-bot"
+REPO_URL="SEU_REPOSITORIO_GITHUB"   # ex: https://github.com/alexis-developers/xau-oanda-cripto-bot.git
+APP_DIR="/root/multi-trader-pro"
 DOMAIN="alexisprofit-bot.desenvolvimentodesites.dev.br"
 
 echo "=== [1/6] Node.js 20 LTS ==="
